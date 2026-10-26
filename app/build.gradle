@@ -14,6 +14,20 @@ android {
         versionName '1.0'
     }
 
+    // Sign every build with the same key so new APKs install over old ones.
+    // CI writes the key from the KEYSTORE_BASE64 / KEYSTORE_PASSWORD secrets.
+    def keystore = rootProject.file('signing.keystore')
+    if (keystore.exists() && System.getenv('KEYSTORE_PASSWORD')) {
+        signingConfigs {
+            debug {
+                storeFile keystore
+                storePassword System.getenv('KEYSTORE_PASSWORD')
+                keyAlias 'musicalchairs'
+                keyPassword System.getenv('KEYSTORE_PASSWORD')
+            }
+        }
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
