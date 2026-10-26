@@ -10,6 +10,7 @@ import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.media.ToneGenerator;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -48,6 +49,7 @@ public class MainActivity extends Activity {
     private State state = State.IDLE;
     private State pausedFrom = State.IDLE;
     private int countdown = 0;
+    private boolean keepingAlive = false;
 
     // Settings (seconds)
     private int minPlay = 10;
@@ -90,6 +92,11 @@ public class MainActivity extends Activity {
         String saved = prefs.getString("songs", "");
         if (!saved.isEmpty()) {
             for (String s : saved.split("\n")) songs.add(Uri.parse(s));
+        }
+
+        // Lets the "game in progress" notification show on Android 13+
+        if (Build.VERSION.SDK_INT >= 33) {
+            requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 1);
         }
 
         buildUi();
@@ -223,6 +230,7 @@ public class MainActivity extends Activity {
     }
 
     private void updateUi() {
+        setKeepAlive(state == State.PLAYING || state == State.STOPPED);
         int bg;
         switch (state) {
             case PLAYING:
@@ -254,6 +262,20 @@ public class MainActivity extends Activity {
         songText.setText(songs.isEmpty() ? "No music chosen"
                 : "♪ " + songName(songs.get(songIndex)) + (songs.size() > 1
                     ? "  (" + (songIndex + 1) + "/" + songs.size() + ")" : ""));
+    }
+
+    // Runs a foreground service while a game is active so it survives the screen turning off.
+    private void setKeepAlive(boolean on) {
+        if (on == keepingAlive) return;
+        keepingAlive = on;
+        Intent i = new Intent(this, KeepAliveService.class);
+        if (!on) {
+            stopService(i);
+        } else if (Build.VERSION.SDK_INT >= 26) {
+            startForegroundService(i);
+        } else {
+            startService(i);
+        }
     }
 
     // ---------- Game logic ----------
@@ -438,6 +460,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         handler.removeCallbacksAndMessages(null);
+        setKeepAlive(false);
         releasePlayer();
         super.onDestroy();
     }
