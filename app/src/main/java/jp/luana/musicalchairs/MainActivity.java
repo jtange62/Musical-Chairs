@@ -3,6 +3,7 @@ package jp.luana.musicalchairs;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.res.ColorStateList;
 import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -22,6 +23,7 @@ import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.SeekBar;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -63,9 +65,18 @@ public class MainActivity extends Activity {
     private TextView bigText;
     private TextView subText;
     private TextView songText;
+    private SeekBar seekBar;
+    private TextView timeText;
+    private boolean userSeeking = false;
     private Button mainButton;
 
     private final Runnable stopRunnable = this::doStop;
+    private final Runnable progressRunnable = new Runnable() {
+        @Override public void run() {
+            updateProgress();
+            handler.postDelayed(this, 500);
+        }
+    };
     private final Runnable tickRunnable = new Runnable() {
         @Override public void run() {
             countdown--;
@@ -100,7 +111,20 @@ public class MainActivity extends Activity {
         }
 
         buildUi();
+        if (!songs.isEmpty()) preparePlayer(0);
         updateUi();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        handler.post(progressRunnable);
+    }
+
+    @Override
+    protected void onPause() {
+        handler.removeCallbacks(progressRunnable);
+        super.onPause();
     }
 
     // ---------- UI ----------
@@ -180,8 +204,29 @@ public class MainActivity extends Activity {
         root.addView(subText);
 
         songText = text(15, false);
-        songText.setPadding(0, dp(8), 0, dp(16));
+        songText.setPadding(0, dp(8), 0, dp(4));
         root.addView(songText);
+
+        seekBar = new SeekBar(this);
+        seekBar.setProgressTintList(ColorStateList.valueOf(Color.WHITE));
+        seekBar.setThumbTintList(ColorStateList.valueOf(Color.WHITE));
+        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
+                if (fromUser && player != null) {
+                    timeText.setText(formatTime(progress) + " / " + formatTime(player.getDuration()));
+                }
+            }
+            @Override public void onStartTrackingTouch(SeekBar sb) { userSeeking = true; }
+            @Override public void onStopTrackingTouch(SeekBar sb) {
+                userSeeking = false;
+                if (player != null) player.seekTo(sb.getProgress());
+            }
+        });
+        root.addView(seekBar);
+
+        timeText = text(14, false);
+        timeText.setPadding(0, 0, 0, dp(16));
+        root.addView(timeText);
 
         mainButton = button("Start", 30);
         mainButton.setOnClickListener(v -> onMainButton());
@@ -262,6 +307,28 @@ public class MainActivity extends Activity {
         songText.setText(songs.isEmpty() ? "No music chosen"
                 : "♪ " + songName(songs.get(songIndex)) + (songs.size() > 1
                     ? "  (" + (songIndex + 1) + "/" + songs.size() + ")" : ""));
+        updateProgress();
+    }
+
+    private void updateProgress() {
+        seekBar.setEnabled(player != null);
+        if (player == null) {
+            seekBar.setMax(1);
+            seekBar.setProgress(0);
+            timeText.setText("0:00 / 0:00");
+            return;
+        }
+        int duration = player.getDuration();
+        if (!userSeeking) {
+            seekBar.setMax(Math.max(duration, 1));
+            seekBar.setProgress(player.getCurrentPosition());
+        }
+        timeText.setText(formatTime(seekBar.getProgress()) + " / " + formatTime(duration));
+    }
+
+    private String formatTime(int ms) {
+        int s = Math.max(ms, 0) / 1000;
+        return (s / 60) + ":" + String.format("%02d", s % 60);
     }
 
     // Runs a foreground service while a game is active so it survives the screen turning off.
@@ -436,6 +503,7 @@ public class MainActivity extends Activity {
         songs.clear();
         songs.addAll(picked);
         songIndex = 0;
+        preparePlayer(0);
         updateUi();
     }
 
