@@ -12,6 +12,8 @@ waits a set number of seconds, then starts the music again by itself.
   name, so name files after the feeling (`Happy.mp3`, `Sneaky.mp3`...). Needs 2+ songs.
 - Stop between songs (Switch songs mode) — beep + STOP screen for this many seconds
   before the next song; 0 fades straight into the next song
+- Start songs at a random spot (Switch songs mode) — on by default; turn off to
+  have each song carry on where it left off
 
 Pick one or several songs with "Choose music"; several songs play in order, one song loops.
 
@@ -34,7 +36,8 @@ The `desktop` folder has the same game as a desktop app (Electron).
 Settings and the chosen songs are remembered between runs. Space bar = the big button.
 
 **Switch songs mode** (in Settings): instead of stopping, the music jumps to a
-different song at a random moment, carrying on where that song left off.
+different song at a random moment, starting at a random spot in the song
+(or carrying on where it left off, with "Start songs at a random spot" off).
 The screen shows the file name in big letters with its own colour, so name
 your files after the feeling (`Happy.mp3`, `Sneaky.mp3`, `Angry.mp3`...).
 Choose 2 or more songs. "Stop between songs" sets how long the beep + STOP

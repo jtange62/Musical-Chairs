@@ -69,6 +69,7 @@ public class MainActivity extends Activity {
     private boolean autoRestart = true;
     private boolean switchMode = false;  // "Switch songs" instead of musical chairs
     private int switchPause = 3;         // STOP screen between songs, 0 = fade straight over
+    private boolean randomStart = true;  // "Switch songs": start each song at a random spot
 
     private SharedPreferences prefs;
 
@@ -87,6 +88,7 @@ public class MainActivity extends Activity {
     private LinearLayout restRow;
     private LinearLayout pauseRow;
     private Switch autoSwitch;
+    private Switch randomSwitch;
 
     private final Runnable stopRunnable = this::switchTime;
     private int fadeStep = 0;
@@ -133,6 +135,7 @@ public class MainActivity extends Activity {
         autoRestart = prefs.getBoolean("autoRestart", true);
         switchMode = prefs.getBoolean("switchMode", false);
         switchPause = prefs.getInt("switchPause", 3);
+        randomStart = prefs.getBoolean("randomStart", true);
         String saved = prefs.getString("songs", "");
         if (!saved.isEmpty()) {
             for (String s : saved.split("\n")) songs.add(Uri.parse(s));
@@ -320,14 +323,26 @@ public class MainActivity extends Activity {
         });
         root.addView(auto);
 
+        randomSwitch = new Switch(this);
+        randomSwitch.setText("Start songs at a random spot");
+        randomSwitch.setTextColor(Color.WHITE);
+        randomSwitch.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+        randomSwitch.setChecked(randomStart);
+        randomSwitch.setPadding(0, dp(8), 0, dp(8));
+        randomSwitch.setOnCheckedChangeListener((b, checked) -> {
+            randomStart = checked;
+            saveSettings();
+        });
+        root.addView(randomSwitch);
+
         showMode();
         setContentView(scroll);
     }
 
     private void setSwitchMode(boolean on) {
         if (on == switchMode) return;
-        resetGame();
         switchMode = on;
+        resetGame();
         saveSettings();
         showMode();
         updateUi();
@@ -343,6 +358,7 @@ public class MainActivity extends Activity {
         restRow.setVisibility(switchMode ? View.GONE : View.VISIBLE);
         pauseRow.setVisibility(switchMode ? View.VISIBLE : View.GONE);
         autoSwitch.setVisibility(switchMode ? View.GONE : View.VISIBLE);
+        randomSwitch.setVisibility(switchMode ? View.VISIBLE : View.GONE);
     }
 
     private void updateUi() {
@@ -498,6 +514,19 @@ public class MainActivity extends Activity {
         positions.put(songIndex, pos >= player.getDuration() - 500 ? 0 : pos);
     }
 
+    // A random spot in the song (ms) that leaves enough music to play until the next switch
+    private int randomSpot(int durationMs) {
+        int room = durationMs - (Math.max(minPlay, maxPlay) + 2) * 1000;
+        return room > 0 ? random.nextInt(room) : 0;
+    }
+
+    // Where song i starts in "Switch songs" mode (ms); the player has song i loaded
+    private int startPosition(int i) {
+        if (randomStart) return randomSpot(player.getDuration());
+        Integer saved = positions.get(i);
+        return saved != null ? saved : 0;
+    }
+
     // Carries on with a different song from where that song left off (after the fade).
     private void switchSong() {
         if (state != State.PLAYING) return;
@@ -553,7 +582,7 @@ public class MainActivity extends Activity {
         cancelSwitch();
         if (player != null) {
             if (player.isPlaying()) player.pause();
-            player.seekTo(0);
+            player.seekTo(switchMode && randomStart ? randomSpot(player.getDuration()) : 0);
         }
         state = State.IDLE;
         updateUi();
@@ -608,7 +637,7 @@ public class MainActivity extends Activity {
             if (mp != null) {
                 songIndex = i;
                 player = mp;
-                if (switchMode && positions.containsKey(i)) player.seekTo(positions.get(i));
+                if (switchMode) player.seekTo(startPosition(i));
                 if (songs.size() == 1) {
                     player.setLooping(true);
                 } else {
@@ -706,6 +735,7 @@ public class MainActivity extends Activity {
                 .putBoolean("autoRestart", autoRestart)
                 .putBoolean("switchMode", switchMode)
                 .putInt("switchPause", switchPause)
+                .putBoolean("randomStart", randomStart)
                 .apply();
     }
 

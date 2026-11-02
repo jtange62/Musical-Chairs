@@ -38,8 +38,10 @@ let restTime = loadSetting('restTime', 10);
 let autoRestart = loadSetting('autoRestart', true);
 let mode = loadSetting('mode', 'chairs');  // 'chairs' or 'switch'
 let switchPause = loadSetting('switchPause', 3);  // STOP screen between songs, 0 = fade straight over
+let randomStart = loadSetting('randomStart', true);  // "Switch songs": start each song at a random spot
 
 function saveSettings() {
+  localStorage.setItem('randomStart', JSON.stringify(randomStart));
   localStorage.setItem('mode', JSON.stringify(mode));
   localStorage.setItem('switchPause', JSON.stringify(switchPause));
   localStorage.setItem('minPlay', JSON.stringify(minPlay));
@@ -99,6 +101,13 @@ function buildUi() {
     }
   };
 
+  const randomBox = $('random');
+  randomBox.checked = randomStart;
+  randomBox.onchange = () => {
+    randomStart = randomBox.checked;
+    saveSettings();
+  };
+
   mainButton.onclick = onMainButton;
   $('reset').onclick = resetGame;
   $('pick').onclick = pickMusic;
@@ -126,8 +135,8 @@ function buildUi() {
 
 function setMode(m) {
   if (m === mode) return;
-  resetGame();
   mode = m;
+  resetGame();
   saveSettings();
   showMode();
   updateUi();
@@ -142,6 +151,7 @@ function showMode() {
   restRow.hidden = switching;
   pauseRow.hidden = !switching;
   $('autoRow').hidden = switching;
+  $('randomRow').hidden = !switching;
 }
 
 // Whether the STOP countdown runs by itself ("Switch songs" always moves on)
@@ -278,6 +288,17 @@ function savePosition() {
   positions[songIndex] = audio.ended ? 0 : audio.currentTime;
 }
 
+// A random spot in the song that leaves enough music to play until the next switch
+function randomSpot(duration) {
+  const room = duration - Math.max(minPlay, maxPlay) - 2;
+  return room > 0 ? Math.random() * room : 0;
+}
+
+// Where song i starts in "Switch songs" mode
+function startPosition(i) {
+  return randomStart ? randomSpot(audio.duration) : positions[i] || 0;
+}
+
 let fadeTimer = null;
 let switchId = 0;
 
@@ -361,7 +382,7 @@ function resetGame() {
   clearTimeout(tickTimer);
   cancelSwitch();
   audio.pause();
-  if (ready) audio.currentTime = 0;
+  if (ready) audio.currentTime = mode === 'switch' && randomStart ? randomSpot(audio.duration) : 0;
   state = 'IDLE';
   updateUi();
 }
@@ -420,7 +441,7 @@ async function loadPlayer(index) {
       songIndex = i;
       ready = true;
       audio.loop = songs.length === 1;
-      if (mode === 'switch' && positions[i]) audio.currentTime = positions[i];
+      if (mode === 'switch') audio.currentTime = startPosition(i);
       return true;
     }
   }
