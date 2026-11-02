@@ -2,6 +2,8 @@ const COLOR_IDLE = '#37474F';
 const COLOR_PLAY = '#2E7D32';
 const COLOR_STOP = '#C62828';
 const COLOR_PAUSE = '#F9A825';
+// One colour per song in "Switch songs" mode (no red or yellow, those mean stop and pause)
+const SONG_COLORS = ['#2E7D32', '#1565C0', '#6A1B9A', '#EF6C00', '#00838F', '#AD1457', '#4E342E', '#283593'];
 
 const $ = (id) => document.getElementById(id);
 const bigText = $('big');
@@ -14,6 +16,7 @@ const mainButton = $('main');
 const audio = new Audio();
 let songs = [];        // file paths
 let songIndex = 0;
+let positions = [];    // where each song left off, for "Switch songs" mode
 let ready = false;     // audio has a song loaded
 let state = 'IDLE';    // IDLE, PLAYING, STOPPED, PAUSED
 let pausedFrom = 'IDLE';
@@ -33,8 +36,10 @@ let minPlay = loadSetting('minPlay', 10);
 let maxPlay = loadSetting('maxPlay', 30);
 let restTime = loadSetting('restTime', 10);
 let autoRestart = loadSetting('autoRestart', true);
+let mode = loadSetting('mode', 'chairs');  // 'chairs' or 'switch'
 
 function saveSettings() {
+  localStorage.setItem('mode', JSON.stringify(mode));
   localStorage.setItem('minPlay', JSON.stringify(minPlay));
   localStorage.setItem('maxPlay', JSON.stringify(maxPlay));
   localStorage.setItem('restTime', JSON.stringify(restTime));
@@ -66,13 +71,17 @@ function stepper(label, get, set, min, max, step) {
   return row;
 }
 
+let minRow, maxRow, restRow;
+
 function buildUi() {
-  const steppers = $('steppers');
-  steppers.append(
-    stepper('Music plays at least', () => minPlay, (v) => { minPlay = v; }, 3, 300, 1),
-    stepper('Music plays at most', () => maxPlay, (v) => { maxPlay = v; }, 3, 300, 1),
-    stepper('Stop time before restart', () => restTime, (v) => { restTime = v; }, 1, 120, 1),
-  );
+  minRow = stepper('', () => minPlay, (v) => { minPlay = v; }, 3, 300, 1);
+  maxRow = stepper('', () => maxPlay, (v) => { maxPlay = v; }, 3, 300, 1);
+  restRow = stepper('Stop time before restart', () => restTime, (v) => { restTime = v; }, 1, 120, 1);
+  $('steppers').append(minRow, maxRow, restRow);
+
+  $('modeChairs').onclick = () => setMode('chairs');
+  $('modeSwitch').onclick = () => setMode('switch');
+  showMode();
 
   const auto = $('auto');
   auto.checked = autoRestart;
@@ -112,13 +121,39 @@ function buildUi() {
   });
 }
 
+function setMode(m) {
+  if (m === mode) return;
+  resetGame();
+  mode = m;
+  saveSettings();
+  showMode();
+  updateUi();
+}
+
+function showMode() {
+  const switching = mode === 'switch';
+  $('modeChairs').classList.toggle('on', !switching);
+  $('modeSwitch').classList.toggle('on', switching);
+  minRow.querySelector('.name').textContent = switching ? 'Switch song after at least' : 'Music plays at least';
+  maxRow.querySelector('.name').textContent = switching ? 'Switch song after at most' : 'Music plays at most';
+  restRow.hidden = switching;
+  $('autoRow').hidden = switching;
+}
+
 function updateUi() {
   window.desktop.keepAwake(state === 'PLAYING' || state === 'STOPPED');
   let bg;
+  bigText.classList.remove('title');
   switch (state) {
     case 'PLAYING':
-      bg = COLOR_PLAY;
-      bigText.textContent = '🎵 Walk! 🎵';
+      if (mode === 'switch') {
+        bg = SONG_COLORS[songIndex % SONG_COLORS.length];
+        bigText.textContent = songTitle(songs[songIndex]);
+        bigText.classList.add('title');
+      } else {
+        bg = COLOR_PLAY;
+        bigText.textContent = '🎵 Walk! 🎵';
+      }
       subText.textContent = '';
       mainButton.textContent = 'Pause';
       break;
@@ -137,7 +172,8 @@ function updateUi() {
     default:
       bg = COLOR_IDLE;
       bigText.textContent = 'Musical\nChairs';
-      subText.textContent = songs.length === 0 ? 'Choose music to begin' : '';
+      subText.textContent = songs.length === 0 ? 'Choose music to begin'
+        : mode === 'switch' && songs.length < 2 ? 'Choose 2 or more songs' : '';
       mainButton.textContent = 'Start';
   }
   document.body.style.backgroundColor = bg;
@@ -185,9 +221,15 @@ async function startPlaying() {
     pickMusic();
     return;
   }
+  if (mode === 'switch' && songs.length < 2) {
+    toast('Choose 2 or more songs for “Switch songs”');
+    pickMusic();
+    return;
+  }
   clearTimeout(tickTimer);
   clearTimeout(stopTimer);
   if (!ready && !(await preparePlayer(songIndex))) return;
+  audio.volume = 1;
   audio.play().catch(() => {});
   state = 'PLAYING';
   scheduleStop();
@@ -199,7 +241,44 @@ function scheduleStop() {
   const hi = Math.max(minPlay, maxPlay);
   // random time in milliseconds between lo and hi seconds
   const ms = lo * 1000 + Math.random() * (hi - lo) * 1000;
-  stopTimer = setTimeout(doStop, ms);
+  stopTimer = setTimeout(mode === 'switch' ? switchSong : doStop, ms);
+}
+
+let fadeTimer = null;
+let switchId = 0;
+
+function fadeOut(ms) {
+  return new Promise((resolve) => {
+    const steps = 10;
+    let n = 0;
+    fadeTimer = setInterval(() => {
+      audio.volume = Math.max(0, 1 - ++n / steps);
+      if (n >= steps) { clearInterval(fadeTimer); resolve(); }
+    }, ms / steps);
+  });
+}
+
+// Stops a song switch that is part way through (on pause or reset).
+function cancelSwitch() {
+  clearInterval(fadeTimer);
+  switchId++;
+}
+
+// "Switch songs" mode: fade out, then carry on with a different song from where it left off.
+async function switchSong() {
+  clearTimeout(stopTimer);
+  const id = ++switchId;
+  await fadeOut(400);
+  if (id !== switchId) return;
+  audio.pause();
+  positions[songIndex] = audio.ended ? 0 : audio.currentTime;
+  let next = Math.floor(Math.random() * (songs.length - 1));
+  if (next >= songIndex) next++;
+  if (!(await preparePlayer(next)) || id !== switchId) return;
+  audio.volume = 1;
+  audio.play().catch(() => {});
+  scheduleStop();
+  updateUi();
 }
 
 function doStop() {
@@ -224,6 +303,7 @@ function tick() {
 function pauseGame() {
   if (state === 'PLAYING') {
     clearTimeout(stopTimer);
+    cancelSwitch();
     audio.pause();
   } else if (state === 'STOPPED') {
     clearTimeout(tickTimer);
@@ -246,6 +326,7 @@ function resumeGame() {
 function resetGame() {
   clearTimeout(stopTimer);
   clearTimeout(tickTimer);
+  cancelSwitch();
   audio.pause();
   if (ready) audio.currentTime = 0;
   state = 'IDLE';
@@ -298,6 +379,7 @@ async function preparePlayer(index) {
       songIndex = i;
       ready = true;
       audio.loop = songs.length === 1;
+      if (mode === 'switch' && positions[i]) audio.currentTime = positions[i];
       return true;
     }
   }
@@ -308,6 +390,10 @@ async function preparePlayer(index) {
 
 audio.addEventListener('ended', async () => {
   if (songs.length <= 1) return;
+  if (mode === 'switch') {
+    if (state === 'PLAYING') switchSong();
+    return;
+  }
   const wasPlaying = state === 'PLAYING';
   if (await preparePlayer((songIndex + 1) % songs.length) && wasPlaying) {
     audio.play().catch(() => {});
@@ -323,12 +409,18 @@ async function pickMusic() {
   resetGame();
   songs = picked;
   songIndex = 0;
+  positions = [];
   await preparePlayer(0);
   updateUi();
 }
 
 function songName(path) {
   return path.split(/[\\/]/).pop() || 'Song';
+}
+
+// File name without the extension, e.g. "Happy.mp3" -> "Happy"
+function songTitle(path) {
+  return songName(path).replace(/\.[^.]+$/, '');
 }
 
 // ---------- Start ----------

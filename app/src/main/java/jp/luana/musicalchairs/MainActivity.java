@@ -29,7 +29,9 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 
 public class MainActivity extends Activity {
@@ -41,10 +43,15 @@ public class MainActivity extends Activity {
     private static final int COLOR_PLAY = Color.parseColor("#2E7D32");
     private static final int COLOR_STOP = Color.parseColor("#C62828");
     private static final int COLOR_PAUSE = Color.parseColor("#F9A825");
+    // One colour per song in "Switch songs" mode (no red or yellow, those mean stop and pause)
+    private static final String[] SONG_COLORS = {"#2E7D32", "#1565C0", "#6A1B9A", "#EF6C00",
+            "#00838F", "#AD1457", "#4E342E", "#283593"};
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Random random = new Random();
     private final List<Uri> songs = new ArrayList<>();
+    // Where each song left off, for "Switch songs" mode (song index -> ms)
+    private final Map<Integer, Integer> positions = new HashMap<>();
 
     private MediaPlayer player;
     private int songIndex = 0;
@@ -58,6 +65,7 @@ public class MainActivity extends Activity {
     private int maxPlay = 30;
     private int restTime = 10;
     private boolean autoRestart = true;
+    private boolean switchMode = false;  // "Switch songs" instead of musical chairs
 
     private SharedPreferences prefs;
 
@@ -69,8 +77,28 @@ public class MainActivity extends Activity {
     private TextView timeText;
     private boolean userSeeking = false;
     private Button mainButton;
+    private Button chairsButton;
+    private Button switchButton;
+    private LinearLayout minRow;
+    private LinearLayout maxRow;
+    private LinearLayout restRow;
+    private Switch autoSwitch;
 
     private final Runnable stopRunnable = this::doStop;
+    private final Runnable switchRunnable = this::fadeAndSwitch;
+    private int fadeStep = 0;
+    private final Runnable fadeRunnable = new Runnable() {
+        @Override public void run() {
+            fadeStep++;
+            float v = Math.max(0f, 1f - fadeStep / 10f);
+            if (player != null) player.setVolume(v, v);
+            if (fadeStep >= 10) {
+                switchSong();
+            } else {
+                handler.postDelayed(this, 40);
+            }
+        }
+    };
     private final Runnable progressRunnable = new Runnable() {
         @Override public void run() {
             updateProgress();
@@ -100,6 +128,7 @@ public class MainActivity extends Activity {
         maxPlay = prefs.getInt("maxPlay", 30);
         restTime = prefs.getInt("restTime", 10);
         autoRestart = prefs.getBoolean("autoRestart", true);
+        switchMode = prefs.getBoolean("switchMode", false);
         String saved = prefs.getString("songs", "");
         if (!saved.isEmpty()) {
             for (String s : saved.split("\n")) songs.add(Uri.parse(s));
@@ -249,11 +278,25 @@ public class MainActivity extends Activity {
         settingsTitle.setPadding(0, dp(20), 0, dp(4));
         root.addView(settingsTitle);
 
-        root.addView(stepper("Music plays at least", () -> minPlay, v -> minPlay = v, 3, 300, 1));
-        root.addView(stepper("Music plays at most", () -> maxPlay, v -> maxPlay = v, 3, 300, 1));
-        root.addView(stepper("Stop time before restart", () -> restTime, v -> restTime = v, 1, 120, 1));
+        LinearLayout modes = new LinearLayout(this);
+        modes.setOrientation(LinearLayout.HORIZONTAL);
+        chairsButton = button("Musical chairs", 16);
+        chairsButton.setOnClickListener(v -> setSwitchMode(false));
+        switchButton = button("Switch songs", 16);
+        switchButton.setOnClickListener(v -> setSwitchMode(true));
+        modes.addView(chairsButton, new LinearLayout.LayoutParams(0, dp(56), 1));
+        modes.addView(switchButton, new LinearLayout.LayoutParams(0, dp(56), 1));
+        root.addView(modes);
+
+        minRow = stepper("", () -> minPlay, v -> minPlay = v, 3, 300, 1);
+        maxRow = stepper("", () -> maxPlay, v -> maxPlay = v, 3, 300, 1);
+        restRow = stepper("Stop time before restart", () -> restTime, v -> restTime = v, 1, 120, 1);
+        root.addView(minRow);
+        root.addView(maxRow);
+        root.addView(restRow);
 
         Switch auto = new Switch(this);
+        autoSwitch = auto;
         auto.setText("Restart music automatically");
         auto.setTextColor(Color.WHITE);
         auto.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
@@ -271,16 +314,44 @@ public class MainActivity extends Activity {
         });
         root.addView(auto);
 
+        showMode();
         setContentView(scroll);
+    }
+
+    private void setSwitchMode(boolean on) {
+        if (on == switchMode) return;
+        resetGame();
+        switchMode = on;
+        saveSettings();
+        showMode();
+        updateUi();
+    }
+
+    private void showMode() {
+        chairsButton.setAlpha(switchMode ? 0.5f : 1f);
+        switchButton.setAlpha(switchMode ? 1f : 0.5f);
+        chairsButton.setTypeface(switchMode ? Typeface.DEFAULT : Typeface.DEFAULT_BOLD);
+        switchButton.setTypeface(switchMode ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+        ((TextView) minRow.getChildAt(0)).setText(switchMode ? "Switch song after at least" : "Music plays at least");
+        ((TextView) maxRow.getChildAt(0)).setText(switchMode ? "Switch song after at most" : "Music plays at most");
+        restRow.setVisibility(switchMode ? View.GONE : View.VISIBLE);
+        autoSwitch.setVisibility(switchMode ? View.GONE : View.VISIBLE);
     }
 
     private void updateUi() {
         setKeepAlive(state == State.PLAYING || state == State.STOPPED);
         int bg;
+        bigText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 64);
         switch (state) {
             case PLAYING:
-                bg = COLOR_PLAY;
-                bigText.setText("🎵 Walk! 🎵");
+                if (switchMode) {
+                    bg = Color.parseColor(SONG_COLORS[songIndex % SONG_COLORS.length]);
+                    bigText.setText(songTitle(songs.get(songIndex)));
+                    bigText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 48);
+                } else {
+                    bg = COLOR_PLAY;
+                    bigText.setText("🎵 Walk! 🎵");
+                }
                 subText.setText("");
                 mainButton.setText("Pause");
                 break;
@@ -299,7 +370,8 @@ public class MainActivity extends Activity {
             default:
                 bg = COLOR_IDLE;
                 bigText.setText("Musical\nChairs");
-                subText.setText(songs.isEmpty() ? "Choose music to begin" : "");
+                subText.setText(songs.isEmpty() ? "Choose music to begin"
+                        : switchMode && songs.size() < 2 ? "Choose 2 or more songs" : "");
                 mainButton.setText("Start");
         }
         root.setBackgroundColor(bg);
@@ -362,9 +434,16 @@ public class MainActivity extends Activity {
             pickMusic();
             return;
         }
+        if (switchMode && songs.size() < 2) {
+            Toast.makeText(this, "Choose 2 or more songs for “Switch songs”", Toast.LENGTH_SHORT).show();
+            pickMusic();
+            return;
+        }
         handler.removeCallbacks(tickRunnable);
         handler.removeCallbacks(stopRunnable);
+        handler.removeCallbacks(switchRunnable);
         if (player == null && !preparePlayer(songIndex)) return;
+        player.setVolume(1f, 1f);
         player.start();
         state = State.PLAYING;
         scheduleStop();
@@ -376,7 +455,36 @@ public class MainActivity extends Activity {
         int hi = Math.max(minPlay, maxPlay);
         // random time in milliseconds between lo and hi seconds
         long ms = lo * 1000L + (long) (random.nextDouble() * (hi - lo) * 1000L);
-        handler.postDelayed(stopRunnable, ms);
+        handler.postDelayed(switchMode ? switchRunnable : stopRunnable, ms);
+    }
+
+    // "Switch songs" mode: fade out over 0.4 s, then switchSong()
+    private void fadeAndSwitch() {
+        fadeStep = 0;
+        handler.post(fadeRunnable);
+    }
+
+    // Carries on with a different song from where that song left off.
+    private void switchSong() {
+        if (state != State.PLAYING) return;
+        if (player != null) {
+            if (player.isPlaying()) player.pause();
+            int pos = player.getCurrentPosition();
+            // A song that has finished starts again from the top next time
+            positions.put(songIndex, pos >= player.getDuration() - 500 ? 0 : pos);
+        }
+        int next = random.nextInt(songs.size() - 1);
+        if (next >= songIndex) next++;
+        if (!preparePlayer(next)) return;
+        player.start();
+        scheduleStop();
+        updateUi();
+    }
+
+    // Stops a song switch that is part way through (on pause or reset).
+    private void cancelSwitch() {
+        handler.removeCallbacks(switchRunnable);
+        handler.removeCallbacks(fadeRunnable);
     }
 
     private void doStop() {
@@ -391,6 +499,7 @@ public class MainActivity extends Activity {
     private void pauseGame() {
         if (state == State.PLAYING) {
             handler.removeCallbacks(stopRunnable);
+            cancelSwitch();
             if (player != null && player.isPlaying()) player.pause();
         } else if (state == State.STOPPED) {
             handler.removeCallbacks(tickRunnable);
@@ -413,6 +522,7 @@ public class MainActivity extends Activity {
     private void resetGame() {
         handler.removeCallbacks(stopRunnable);
         handler.removeCallbacks(tickRunnable);
+        cancelSwitch();
         if (player != null) {
             if (player.isPlaying()) player.pause();
             player.seekTo(0);
@@ -440,10 +550,18 @@ public class MainActivity extends Activity {
             if (mp != null) {
                 songIndex = i;
                 player = mp;
+                if (switchMode && positions.containsKey(i)) player.seekTo(positions.get(i));
                 if (songs.size() == 1) {
                     player.setLooping(true);
                 } else {
                     player.setOnCompletionListener(done -> {
+                        if (switchMode) {
+                            if (state == State.PLAYING) {
+                                cancelSwitch();
+                                switchSong();
+                            }
+                            return;
+                        }
                         boolean wasPlaying = state == State.PLAYING;
                         if (preparePlayer((songIndex + 1) % songs.size()) && wasPlaying) {
                             player.start();
@@ -503,6 +621,7 @@ public class MainActivity extends Activity {
         songs.clear();
         songs.addAll(picked);
         songIndex = 0;
+        positions.clear();
         preparePlayer(0);
         updateUi();
     }
@@ -516,12 +635,18 @@ public class MainActivity extends Activity {
         return last != null ? last : "Song";
     }
 
+    // File name without the extension, e.g. "Happy.mp3" -> "Happy"
+    private String songTitle(Uri uri) {
+        return songName(uri).replaceAll("\\.[^.]+$", "");
+    }
+
     private void saveSettings() {
         prefs.edit()
                 .putInt("minPlay", minPlay)
                 .putInt("maxPlay", maxPlay)
                 .putInt("restTime", restTime)
                 .putBoolean("autoRestart", autoRestart)
+                .putBoolean("switchMode", switchMode)
                 .apply();
     }
 

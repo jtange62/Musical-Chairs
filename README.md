@@ -7,6 +7,9 @@ waits a set number of seconds, then starts the music again by itself.
 - Music plays at least / at most — the random stop lands somewhere in this range
 - Stop time before restart — the countdown on the red screen
 - Restart music automatically — turn off to restart by hand with "Play now"
+- Switch songs mode — instead of stopping, jumps to a different song at a random
+  moment (each song carries on where it left off). The screen shows the file
+  name, so name files after the feeling (`Happy.mp3`, `Sneaky.mp3`...). Needs 2+ songs.
 
 Pick one or several songs with "Choose music"; several songs play in order, one song loops.
 
@@ -27,6 +30,12 @@ file manager or browser when Android asks.
 
 The `desktop` folder has the same game as a desktop app (Electron).
 Settings and the chosen songs are remembered between runs. Space bar = the big button.
+
+**Switch songs mode** (in Settings): instead of stopping, the music jumps to a
+different song at a random moment, carrying on where that song left off.
+The screen shows the file name in big letters with its own colour, so name
+your files after the feeling (`Happy.mp3`, `Sneaky.mp3`, `Angry.mp3`...).
+Choose 2 or more songs.
 
 ## Get the .exe from GitHub
 Push to GitHub → **Actions** tab → "Build Windows app" runs automatically →
