@@ -10,6 +10,8 @@ waits a set number of seconds, then starts the music again by itself.
 - Switch songs mode — instead of stopping, jumps to a different song at a random
   moment (each song carries on where it left off). The screen shows the file
   name, so name files after the feeling (`Happy.mp3`, `Sneaky.mp3`...). Needs 2+ songs.
+- Stop between songs (Switch songs mode) — beep + STOP screen for this many seconds
+  before the next song; 0 fades straight into the next song
 
 Pick one or several songs with "Choose music"; several songs play in order, one song loops.
 
@@ -35,7 +37,8 @@ Settings and the chosen songs are remembered between runs. Space bar = the big b
 different song at a random moment, carrying on where that song left off.
 The screen shows the file name in big letters with its own colour, so name
 your files after the feeling (`Happy.mp3`, `Sneaky.mp3`, `Angry.mp3`...).
-Choose 2 or more songs.
+Choose 2 or more songs. "Stop between songs" sets how long the beep + STOP
+screen lasts before the next song (0 = fade straight over).
 
 ## Get the .exe from GitHub
 Push to GitHub → **Actions** tab → "Build Windows app" runs automatically →

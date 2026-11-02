@@ -66,6 +66,7 @@ public class MainActivity extends Activity {
     private int restTime = 10;
     private boolean autoRestart = true;
     private boolean switchMode = false;  // "Switch songs" instead of musical chairs
+    private int switchPause = 3;         // STOP screen between songs, 0 = fade straight over
 
     private SharedPreferences prefs;
 
@@ -82,10 +83,10 @@ public class MainActivity extends Activity {
     private LinearLayout minRow;
     private LinearLayout maxRow;
     private LinearLayout restRow;
+    private LinearLayout pauseRow;
     private Switch autoSwitch;
 
-    private final Runnable stopRunnable = this::doStop;
-    private final Runnable switchRunnable = this::fadeAndSwitch;
+    private final Runnable stopRunnable = this::switchTime;
     private int fadeStep = 0;
     private final Runnable fadeRunnable = new Runnable() {
         @Override public void run() {
@@ -129,6 +130,7 @@ public class MainActivity extends Activity {
         restTime = prefs.getInt("restTime", 10);
         autoRestart = prefs.getBoolean("autoRestart", true);
         switchMode = prefs.getBoolean("switchMode", false);
+        switchPause = prefs.getInt("switchPause", 3);
         String saved = prefs.getString("songs", "");
         if (!saved.isEmpty()) {
             for (String s : saved.split("\n")) songs.add(Uri.parse(s));
@@ -294,6 +296,8 @@ public class MainActivity extends Activity {
         root.addView(minRow);
         root.addView(maxRow);
         root.addView(restRow);
+        pauseRow = stepper("Stop between songs", () -> switchPause, v -> switchPause = v, 0, 60, 1);
+        root.addView(pauseRow);
 
         Switch auto = new Switch(this);
         autoSwitch = auto;
@@ -335,6 +339,7 @@ public class MainActivity extends Activity {
         ((TextView) minRow.getChildAt(0)).setText(switchMode ? "Switch song after at least" : "Music plays at least");
         ((TextView) maxRow.getChildAt(0)).setText(switchMode ? "Switch song after at most" : "Music plays at most");
         restRow.setVisibility(switchMode ? View.GONE : View.VISIBLE);
+        pauseRow.setVisibility(switchMode ? View.VISIBLE : View.GONE);
         autoSwitch.setVisibility(switchMode ? View.GONE : View.VISIBLE);
     }
 
@@ -358,7 +363,9 @@ public class MainActivity extends Activity {
             case STOPPED:
                 bg = COLOR_STOP;
                 bigText.setText("STOP!\n🪑");
-                subText.setText(autoRestart ? "Music in " + countdown + "…" : "Tap “Play” when ready");
+                subText.setText(autoNext()
+                        ? (switchMode ? "Next song in " : "Music in ") + countdown + "…"
+                        : "Tap “Play” when ready");
                 mainButton.setText("Play now");
                 break;
             case PAUSED:
@@ -441,7 +448,9 @@ public class MainActivity extends Activity {
         }
         handler.removeCallbacks(tickRunnable);
         handler.removeCallbacks(stopRunnable);
-        handler.removeCallbacks(switchRunnable);
+        cancelSwitch();
+        // After the STOP screen in "Switch songs", carry on with a different song
+        if (switchMode && state == State.STOPPED && !preparePlayer(pickNext())) return;
         if (player == null && !preparePlayer(songIndex)) return;
         player.setVolume(1f, 1f);
         player.start();
@@ -455,45 +464,62 @@ public class MainActivity extends Activity {
         int hi = Math.max(minPlay, maxPlay);
         // random time in milliseconds between lo and hi seconds
         long ms = lo * 1000L + (long) (random.nextDouble() * (hi - lo) * 1000L);
-        handler.postDelayed(switchMode ? switchRunnable : stopRunnable, ms);
+        handler.postDelayed(stopRunnable, ms);
     }
 
-    // "Switch songs" mode: fade out over 0.4 s, then switchSong()
-    private void fadeAndSwitch() {
-        fadeStep = 0;
-        handler.post(fadeRunnable);
+    // The random moment: stop (musical chairs, or "Switch songs" with a stop), or fade to the next song.
+    private void switchTime() {
+        handler.removeCallbacks(stopRunnable);
+        if (switchMode && switchPause == 0) {
+            fadeStep = 0;
+            handler.post(fadeRunnable);
+        } else {
+            doStop();
+        }
     }
 
-    // Carries on with a different song from where that song left off.
+    // Whether the STOP countdown runs by itself ("Switch songs" always moves on)
+    private boolean autoNext() {
+        return switchMode || autoRestart;
+    }
+
+    // A random song other than the current one
+    private int pickNext() {
+        int next = random.nextInt(songs.size() - 1);
+        return next >= songIndex ? next + 1 : next;
+    }
+
+    private void savePosition() {
+        if (player == null) return;
+        int pos = player.getCurrentPosition();
+        // A song that has finished starts again from the top next time
+        positions.put(songIndex, pos >= player.getDuration() - 500 ? 0 : pos);
+    }
+
+    // Carries on with a different song from where that song left off (after the fade).
     private void switchSong() {
         if (state != State.PLAYING) return;
-        if (player != null) {
-            if (player.isPlaying()) player.pause();
-            int pos = player.getCurrentPosition();
-            // A song that has finished starts again from the top next time
-            positions.put(songIndex, pos >= player.getDuration() - 500 ? 0 : pos);
-        }
-        int next = random.nextInt(songs.size() - 1);
-        if (next >= songIndex) next++;
-        if (!preparePlayer(next)) return;
+        if (player != null && player.isPlaying()) player.pause();
+        savePosition();
+        if (!preparePlayer(pickNext())) return;
         player.start();
         scheduleStop();
         updateUi();
     }
 
-    // Stops a song switch that is part way through (on pause or reset).
+    // Stops a song fade that is part way through (on pause or reset).
     private void cancelSwitch() {
-        handler.removeCallbacks(switchRunnable);
         handler.removeCallbacks(fadeRunnable);
     }
 
     private void doStop() {
         if (player != null && player.isPlaying()) player.pause();
+        if (switchMode) savePosition();
         beep();
         state = State.STOPPED;
-        countdown = restTime;
+        countdown = switchMode ? switchPause : restTime;
         updateUi();
-        if (autoRestart) handler.postDelayed(tickRunnable, 1000);
+        if (autoNext()) handler.postDelayed(tickRunnable, 1000);
     }
 
     private void pauseGame() {
@@ -513,7 +539,7 @@ public class MainActivity extends Activity {
         if (pausedFrom == State.STOPPED) {
             state = State.STOPPED;
             updateUi();
-            if (autoRestart) handler.postDelayed(tickRunnable, 1000);
+            if (autoNext()) handler.postDelayed(tickRunnable, 1000);
         } else {
             startPlaying();
         }
@@ -558,7 +584,7 @@ public class MainActivity extends Activity {
                         if (switchMode) {
                             if (state == State.PLAYING) {
                                 cancelSwitch();
-                                switchSong();
+                                switchTime();
                             }
                             return;
                         }
@@ -647,6 +673,7 @@ public class MainActivity extends Activity {
                 .putInt("restTime", restTime)
                 .putBoolean("autoRestart", autoRestart)
                 .putBoolean("switchMode", switchMode)
+                .putInt("switchPause", switchPause)
                 .apply();
     }
 

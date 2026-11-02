@@ -37,9 +37,11 @@ let maxPlay = loadSetting('maxPlay', 30);
 let restTime = loadSetting('restTime', 10);
 let autoRestart = loadSetting('autoRestart', true);
 let mode = loadSetting('mode', 'chairs');  // 'chairs' or 'switch'
+let switchPause = loadSetting('switchPause', 3);  // STOP screen between songs, 0 = fade straight over
 
 function saveSettings() {
   localStorage.setItem('mode', JSON.stringify(mode));
+  localStorage.setItem('switchPause', JSON.stringify(switchPause));
   localStorage.setItem('minPlay', JSON.stringify(minPlay));
   localStorage.setItem('maxPlay', JSON.stringify(maxPlay));
   localStorage.setItem('restTime', JSON.stringify(restTime));
@@ -71,13 +73,14 @@ function stepper(label, get, set, min, max, step) {
   return row;
 }
 
-let minRow, maxRow, restRow;
+let minRow, maxRow, restRow, pauseRow;
 
 function buildUi() {
   minRow = stepper('', () => minPlay, (v) => { minPlay = v; }, 3, 300, 1);
   maxRow = stepper('', () => maxPlay, (v) => { maxPlay = v; }, 3, 300, 1);
   restRow = stepper('Stop time before restart', () => restTime, (v) => { restTime = v; }, 1, 120, 1);
-  $('steppers').append(minRow, maxRow, restRow);
+  pauseRow = stepper('Stop between songs', () => switchPause, (v) => { switchPause = v; }, 0, 60, 1);
+  $('steppers').append(minRow, maxRow, restRow, pauseRow);
 
   $('modeChairs').onclick = () => setMode('chairs');
   $('modeSwitch').onclick = () => setMode('switch');
@@ -137,7 +140,13 @@ function showMode() {
   minRow.querySelector('.name').textContent = switching ? 'Switch song after at least' : 'Music plays at least';
   maxRow.querySelector('.name').textContent = switching ? 'Switch song after at most' : 'Music plays at most';
   restRow.hidden = switching;
+  pauseRow.hidden = !switching;
   $('autoRow').hidden = switching;
+}
+
+// Whether the STOP countdown runs by itself ("Switch songs" always moves on)
+function autoNext() {
+  return mode === 'switch' || autoRestart;
 }
 
 function updateUi() {
@@ -160,7 +169,9 @@ function updateUi() {
     case 'STOPPED':
       bg = COLOR_STOP;
       bigText.textContent = 'STOP!\n🪑';
-      subText.textContent = autoRestart ? 'Music in ' + countdown + '…' : 'Press “Play now” when ready';
+      subText.textContent = autoNext()
+        ? (mode === 'switch' ? 'Next song in ' : 'Music in ') + countdown + '…'
+        : 'Press “Play now” when ready';
       mainButton.textContent = 'Play now';
       break;
     case 'PAUSED':
@@ -228,6 +239,11 @@ async function startPlaying() {
   }
   clearTimeout(tickTimer);
   clearTimeout(stopTimer);
+  if (mode === 'switch' && state === 'STOPPED') {
+    // After the STOP screen, carry on with a different song
+    if (!(await preparePlayer(pickNext())) || state !== 'STOPPED') return;
+  }
+  await preparing;
   if (!ready && !(await preparePlayer(songIndex))) return;
   audio.volume = 1;
   audio.play().catch(() => {});
@@ -241,7 +257,25 @@ function scheduleStop() {
   const hi = Math.max(minPlay, maxPlay);
   // random time in milliseconds between lo and hi seconds
   const ms = lo * 1000 + Math.random() * (hi - lo) * 1000;
-  stopTimer = setTimeout(mode === 'switch' ? switchSong : doStop, ms);
+  stopTimer = setTimeout(switchTime, ms);
+}
+
+// The random moment: stop (musical chairs, or "Switch songs" with a stop), or fade to the next song.
+function switchTime() {
+  clearTimeout(stopTimer);
+  if (mode === 'switch' && switchPause === 0) switchSong();
+  else doStop();
+}
+
+// A random song other than the current one
+function pickNext() {
+  let next = Math.floor(Math.random() * (songs.length - 1));
+  if (next >= songIndex) next++;
+  return next;
+}
+
+function savePosition() {
+  positions[songIndex] = audio.ended ? 0 : audio.currentTime;
 }
 
 let fadeTimer = null;
@@ -271,10 +305,8 @@ async function switchSong() {
   await fadeOut(400);
   if (id !== switchId) return;
   audio.pause();
-  positions[songIndex] = audio.ended ? 0 : audio.currentTime;
-  let next = Math.floor(Math.random() * (songs.length - 1));
-  if (next >= songIndex) next++;
-  if (!(await preparePlayer(next)) || id !== switchId) return;
+  savePosition();
+  if (!(await preparePlayer(pickNext())) || id !== switchId) return;
   audio.volume = 1;
   audio.play().catch(() => {});
   scheduleStop();
@@ -283,11 +315,12 @@ async function switchSong() {
 
 function doStop() {
   audio.pause();
+  if (mode === 'switch') savePosition();
   beep();
   state = 'STOPPED';
-  countdown = restTime;
+  countdown = mode === 'switch' ? switchPause : restTime;
   updateUi();
-  if (autoRestart) tickTimer = setTimeout(tick, 1000);
+  if (autoNext()) tickTimer = setTimeout(tick, 1000);
 }
 
 function tick() {
@@ -317,7 +350,7 @@ function resumeGame() {
   if (pausedFrom === 'STOPPED') {
     state = 'STOPPED';
     updateUi();
-    if (autoRestart) tickTimer = setTimeout(tick, 1000);
+    if (autoNext()) tickTimer = setTimeout(tick, 1000);
   } else {
     startPlaying();
   }
@@ -371,7 +404,14 @@ function loadSong(path) {
   });
 }
 
-async function preparePlayer(index) {
+// Loads one song at a time, so a Start pressed while a song is loading waits for it.
+let preparing = Promise.resolve(false);
+function preparePlayer(index) {
+  preparing = preparing.then(() => loadPlayer(index));
+  return preparing;
+}
+
+async function loadPlayer(index) {
   ready = false;
   for (let tries = 0; tries < songs.length; tries++) {
     const i = (index + tries) % songs.length;
@@ -391,7 +431,7 @@ async function preparePlayer(index) {
 audio.addEventListener('ended', async () => {
   if (songs.length <= 1) return;
   if (mode === 'switch') {
-    if (state === 'PLAYING') switchSong();
+    if (state === 'PLAYING') switchTime();
     return;
   }
   const wasPlaying = state === 'PLAYING';
