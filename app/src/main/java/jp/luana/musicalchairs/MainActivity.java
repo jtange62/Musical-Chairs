@@ -7,9 +7,11 @@ import android.content.res.ColorStateList;
 import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.media.AudioAttributes;
+import android.media.AudioFormat;
 import android.media.AudioManager;
+import android.media.AudioTrack;
 import android.media.MediaPlayer;
-import android.media.ToneGenerator;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -557,12 +559,42 @@ public class MainActivity extends Activity {
         updateUi();
     }
 
+    // Soft two-note chime ("ding-dong")
     private void beep() {
         try {
-            ToneGenerator tg = new ToneGenerator(AudioManager.STREAM_MUSIC, 100);
-            tg.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 500);
-            handler.postDelayed(tg::release, 800);
+            int rate = 44100;
+            short[] pcm = new short[(int) (rate * 1.3)];
+            addChimeNote(pcm, rate, 784, 0);
+            addChimeNote(pcm, rate, 523, 0.28);
+            AudioTrack track = new AudioTrack.Builder()
+                    .setAudioAttributes(new AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .build())
+                    .setAudioFormat(new AudioFormat.Builder()
+                            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                            .setSampleRate(rate)
+                            .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                            .build())
+                    .setBufferSizeInBytes(pcm.length * 2)
+                    .setTransferMode(AudioTrack.MODE_STATIC)
+                    .build();
+            track.write(pcm, 0, pcm.length);
+            track.play();
+            handler.postDelayed(track::release, 1600);
         } catch (RuntimeException ignored) { }
+    }
+
+    // Adds one bell-like note: fades in quickly, then dies away
+    private static void addChimeNote(short[] pcm, int rate, double hz, double startSec) {
+        int start = (int) (startSec * rate);
+        int len = Math.min(pcm.length - start, rate);
+        for (int i = 0; i < len; i++) {
+            double t = (double) i / rate;
+            double env = Math.min(1, t / 0.02) * Math.exp(-t * 5);
+            double s = pcm[start + i] + Math.sin(2 * Math.PI * hz * t) * env * 0.3 * Short.MAX_VALUE;
+            pcm[start + i] = (short) Math.max(Short.MIN_VALUE, Math.min(Short.MAX_VALUE, s));
+        }
     }
 
     // ---------- Music ----------

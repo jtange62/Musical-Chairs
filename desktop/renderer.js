@@ -371,17 +371,18 @@ function beep() {
   try {
     beepCtx = beepCtx || new AudioContext();
     const t = beepCtx.currentTime;
-    const gain = beepCtx.createGain();
-    gain.gain.value = 0.4;
-    gain.connect(beepCtx.destination);
-    // Two quick alternating tones, about half a second in all
-    for (let i = 0; i < 4; i++) {
+    // Soft two-note chime ("ding-dong"): each note fades in quickly and dies away like a bell
+    for (const [hz, at] of [[784, 0], [523, 0.28]]) {
       const osc = beepCtx.createOscillator();
-      osc.type = 'square';
-      osc.frequency.value = i % 2 ? 1150 : 770;
-      osc.connect(gain);
-      osc.start(t + i * 0.125);
-      osc.stop(t + (i + 1) * 0.125);
+      const gain = beepCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = hz;
+      gain.gain.setValueAtTime(0, t + at);
+      gain.gain.linearRampToValueAtTime(0.3, t + at + 0.02);
+      gain.gain.setTargetAtTime(0, t + at + 0.02, 0.2);
+      osc.connect(gain).connect(beepCtx.destination);
+      osc.start(t + at);
+      osc.stop(t + at + 1);
     }
   } catch { /* no sound device */ }
 }
