@@ -60,6 +60,13 @@
   .modes { display: flex; gap: 8px; margin-bottom: 8px; }
   .modes button { flex: 1; height: 48px; font-size: 17px; background: rgba(255, 255, 255, 0.3); color: #fff; }
   .modes button.on { background: #fff; color: #222; font-weight: bold; }
+  #startRow { padding: 8px 0; font-size: 18px; }
+  #startRow .label { margin-bottom: 6px; }
+  #startRow .modes button { font-size: 15px; height: 44px; }
+  #markRow { margin: 0 0 12px; }
+  #markRow button { height: 40px; font-size: 15px; background: rgba(255, 255, 255, 0.3); color: #fff; }
+  #markRow button:hover { background: rgba(255, 255, 255, 0.45); }
+  #markRow #mark { flex: 3; }
   label.switch { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; font-size: 18px; cursor: pointer; }
   label.switch input { width: 22px; height: 22px; accent-color: #fff; }
   #toast {
@@ -77,6 +84,10 @@
   <div id="song" class="center"></div>
   <input id="seek" type="range" min="0" max="1" step="0.1" value="0">
   <div id="time" class="center"></div>
+  <div class="row" id="markRow">
+    <button id="mark">📍 Start this song here</button>
+    <button id="unmark">Undo</button>
+  </div>
   <button id="main">Start</button>
   <div class="row">
     <button id="reset">Reset</button>
@@ -89,9 +100,17 @@
   </div>
   <div id="steppers"></div>
   <label class="switch" id="autoRow">Restart music automatically <input id="auto" type="checkbox"></label>
-  <label class="switch" id="randomRow">Start songs at a random spot <input id="random" type="checkbox"></label>
+  <div id="startRow">
+    <div class="label">Songs start at</div>
+    <div class="modes">
+      <button id="startCatchy">Catchy part</button>
+      <button id="startRandom">Random spot</button>
+      <button id="startResume">Where it left off</button>
+    </div>
+  </div>
 </div>
 <div id="toast"></div>
+<script src="highlights.js"></script>
 <script src="renderer.js"></script>
 </body>
 </html>

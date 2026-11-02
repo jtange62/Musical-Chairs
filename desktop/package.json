@@ -14,6 +14,7 @@
       "main.js",
       "preload.js",
       "index.html",
+      "highlights.js",
       "renderer.js",
       "assets/icon.png"
     ],

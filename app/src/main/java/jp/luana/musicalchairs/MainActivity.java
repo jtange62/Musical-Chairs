@@ -35,6 +35,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 public class MainActivity extends Activity {
 
@@ -69,7 +75,14 @@ public class MainActivity extends Activity {
     private boolean autoRestart = true;
     private boolean switchMode = false;  // "Switch songs" instead of musical chairs
     private int switchPause = 3;         // STOP screen between songs, 0 = fade straight over
-    private boolean randomStart = true;  // "Switch songs": start each song at a random spot
+    // "Switch songs": where each song starts - "catchy" part, "random" spot, or "resume" where it left off
+    private String startAt = "catchy";
+    // Per song: {"starts": [seconds of the catchy part], "mark": seconds chosen by hand}
+    private JSONObject highlights = new JSONObject();
+    private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    private boolean analyzing = false;
+    private int analyzeDone = 0;
+    private int analyzeTotal = 0;
 
     private SharedPreferences prefs;
 
@@ -88,7 +101,12 @@ public class MainActivity extends Activity {
     private LinearLayout restRow;
     private LinearLayout pauseRow;
     private Switch autoSwitch;
-    private Switch randomSwitch;
+    private LinearLayout startRow;
+    private Button startCatchy;
+    private Button startRandom;
+    private Button startResume;
+    private LinearLayout markRow;
+    private Button unmarkButton;
 
     private final Runnable stopRunnable = this::switchTime;
     private int fadeStep = 0;
@@ -135,7 +153,10 @@ public class MainActivity extends Activity {
         autoRestart = prefs.getBoolean("autoRestart", true);
         switchMode = prefs.getBoolean("switchMode", false);
         switchPause = prefs.getInt("switchPause", 3);
-        randomStart = prefs.getBoolean("randomStart", true);
+        startAt = prefs.getString("startAt", "catchy");
+        try {
+            highlights = new JSONObject(prefs.getString("highlights", "{}"));
+        } catch (JSONException ignored) { }
         String saved = prefs.getString("songs", "");
         if (!saved.isEmpty()) {
             for (String s : saved.split("\n")) songs.add(Uri.parse(s));
@@ -149,6 +170,7 @@ public class MainActivity extends Activity {
         buildUi();
         if (!songs.isEmpty()) preparePlayer(0);
         updateUi();
+        if (switchMode && startAt.equals("catchy")) findCatchyParts();
     }
 
     @Override
@@ -264,6 +286,17 @@ public class MainActivity extends Activity {
         timeText.setPadding(0, 0, 0, dp(16));
         root.addView(timeText);
 
+        markRow = new LinearLayout(this);
+        markRow.setOrientation(LinearLayout.HORIZONTAL);
+        markRow.setPadding(0, 0, 0, dp(8));
+        Button mark = button("📍 Start this song here", 15);
+        mark.setOnClickListener(v -> markSpot());
+        unmarkButton = button("Undo", 15);
+        unmarkButton.setOnClickListener(v -> unmarkSpot());
+        markRow.addView(mark, new LinearLayout.LayoutParams(0, dp(52), 3));
+        markRow.addView(unmarkButton, new LinearLayout.LayoutParams(0, dp(52), 1));
+        root.addView(markRow);
+
         mainButton = button("Start", 30);
         mainButton.setOnClickListener(v -> onMainButton());
         root.addView(mainButton, new LinearLayout.LayoutParams(
@@ -323,20 +356,36 @@ public class MainActivity extends Activity {
         });
         root.addView(auto);
 
-        randomSwitch = new Switch(this);
-        randomSwitch.setText("Start songs at a random spot");
-        randomSwitch.setTextColor(Color.WHITE);
-        randomSwitch.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
-        randomSwitch.setChecked(randomStart);
-        randomSwitch.setPadding(0, dp(8), 0, dp(8));
-        randomSwitch.setOnCheckedChangeListener((b, checked) -> {
-            randomStart = checked;
-            saveSettings();
-        });
-        root.addView(randomSwitch);
+        startRow = new LinearLayout(this);
+        startRow.setOrientation(LinearLayout.VERTICAL);
+        startRow.setPadding(0, dp(8), 0, dp(8));
+        TextView startLabel = text(18, false);
+        startLabel.setGravity(Gravity.START);
+        startLabel.setText("Songs start at");
+        startRow.addView(startLabel);
+        LinearLayout starts = new LinearLayout(this);
+        starts.setOrientation(LinearLayout.HORIZONTAL);
+        startCatchy = button("Catchy part", 14);
+        startCatchy.setOnClickListener(v -> setStartAt("catchy"));
+        startRandom = button("Random spot", 14);
+        startRandom.setOnClickListener(v -> setStartAt("random"));
+        startResume = button("Where it left off", 14);
+        startResume.setOnClickListener(v -> setStartAt("resume"));
+        starts.addView(startCatchy, new LinearLayout.LayoutParams(0, dp(56), 1));
+        starts.addView(startRandom, new LinearLayout.LayoutParams(0, dp(56), 1));
+        starts.addView(startResume, new LinearLayout.LayoutParams(0, dp(56), 1));
+        startRow.addView(starts);
+        root.addView(startRow);
 
         showMode();
         setContentView(scroll);
+    }
+
+    private void setStartAt(String s) {
+        startAt = s;
+        saveSettings();
+        showMode();
+        if (startAt.equals("catchy")) findCatchyParts();
     }
 
     private void setSwitchMode(boolean on) {
@@ -346,6 +395,7 @@ public class MainActivity extends Activity {
         saveSettings();
         showMode();
         updateUi();
+        if (switchMode && startAt.equals("catchy")) findCatchyParts();
     }
 
     private void showMode() {
@@ -358,7 +408,97 @@ public class MainActivity extends Activity {
         restRow.setVisibility(switchMode ? View.GONE : View.VISIBLE);
         pauseRow.setVisibility(switchMode ? View.VISIBLE : View.GONE);
         autoSwitch.setVisibility(switchMode ? View.GONE : View.VISIBLE);
-        randomSwitch.setVisibility(switchMode ? View.VISIBLE : View.GONE);
+        startRow.setVisibility(switchMode ? View.VISIBLE : View.GONE);
+        Button[] startButtons = {startCatchy, startRandom, startResume};
+        String[] startValues = {"catchy", "random", "resume"};
+        for (int i = 0; i < 3; i++) {
+            boolean on = startAt.equals(startValues[i]);
+            startButtons[i].setAlpha(on ? 1f : 0.5f);
+            startButtons[i].setTypeface(on ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+        }
+        showMark();
+    }
+
+    // ---------- Catchy parts ----------
+
+    // Analyzes any chosen songs not analyzed yet, one at a time, in the background
+    private void findCatchyParts() {
+        if (analyzing) return;
+        List<Uri> todo = new ArrayList<>();
+        for (Uri u : songs) {
+            JSONObject h = highlights.optJSONObject(u.toString());
+            if (h == null || !h.has("starts")) todo.add(u);
+        }
+        if (todo.isEmpty()) return;
+        analyzing = true;
+        analyzeDone = 0;
+        analyzeTotal = todo.size();
+        updateUi();
+        worker.execute(() -> {
+            for (Uri u : todo) {
+                double[] found;
+                try {
+                    found = Highlights.find(Highlights.decode(this, u), Highlights.RATE);
+                } catch (Exception | OutOfMemoryError e) {
+                    found = new double[0];
+                }
+                final double[] result = found;
+                handler.post(() -> {
+                    JSONArray starts = new JSONArray();
+                    for (double s : result) {
+                        try { starts.put(s); } catch (JSONException ignored) { }
+                    }
+                    putHighlight(u, "starts", starts);
+                    analyzeDone++;
+                    // The first song was cued up before its analysis finished: cue it to the catchy part now
+                    if (!songs.isEmpty() && u.equals(songs.get(songIndex)) && state == State.IDLE && player != null) {
+                        player.seekTo(startPosition(songIndex));
+                    }
+                    updateUi();
+                });
+            }
+            handler.post(() -> {
+                analyzing = false;
+                updateUi();
+                findCatchyParts();  // songs chosen in the meantime
+            });
+        });
+    }
+
+    private void putHighlight(Uri song, String key, Object value) {
+        try {
+            JSONObject h = highlights.optJSONObject(song.toString());
+            if (h == null) {
+                h = new JSONObject();
+                highlights.put(song.toString(), h);
+            }
+            if (value == null) h.remove(key); else h.put(key, value);
+        } catch (JSONException ignored) { }
+        prefs.edit().putString("highlights", highlights.toString()).apply();
+    }
+
+    private void showMark() {
+        boolean show = switchMode && startAt.equals("catchy") && player != null;
+        markRow.setVisibility(show ? View.VISIBLE : View.GONE);
+        JSONObject h = songs.isEmpty() ? null : highlights.optJSONObject(songs.get(songIndex).toString());
+        unmarkButton.setVisibility(h != null && h.has("mark") ? View.VISIBLE : View.GONE);
+    }
+
+    // Sets where the current song starts from now on (just before now, to allow for reaction time)
+    private void markSpot() {
+        if (player == null) return;
+        double at = Math.max(0, Math.round((player.getCurrentPosition() - 300) / 100.0) / 10.0);
+        putHighlight(songs.get(songIndex), "mark", at);
+        Toast.makeText(this, songTitle(songs.get(songIndex)) + " will start at " + formatTime((int) (at * 1000)),
+                Toast.LENGTH_SHORT).show();
+        updateUi();
+    }
+
+    private void unmarkSpot() {
+        putHighlight(songs.get(songIndex), "mark", null);
+        Toast.makeText(this, songTitle(songs.get(songIndex)) + " will start at its catchy part",
+                Toast.LENGTH_SHORT).show();
+        updateUi();
     }
 
     private void updateUi() {
@@ -404,6 +544,10 @@ public class MainActivity extends Activity {
         songText.setText(songs.isEmpty() ? "No music chosen"
                 : "♪ " + songName(songs.get(songIndex)) + (songs.size() > 1
                     ? "  (" + (songIndex + 1) + "/" + songs.size() + ")" : ""));
+        if (analyzing && switchMode && startAt.equals("catchy")) {
+            songText.append("  ·  finding catchy parts " + analyzeDone + "/" + analyzeTotal + "…");
+        }
+        showMark();
         updateProgress();
     }
 
@@ -522,9 +666,20 @@ public class MainActivity extends Activity {
 
     // Where song i starts in "Switch songs" mode (ms); the player has song i loaded
     private int startPosition(int i) {
-        if (randomStart) return randomSpot(player.getDuration());
-        Integer saved = positions.get(i);
-        return saved != null ? saved : 0;
+        if (startAt.equals("resume")) {
+            Integer saved = positions.get(i);
+            return saved != null ? saved : 0;
+        }
+        JSONObject h = highlights.optJSONObject(songs.get(i).toString());
+        if (startAt.equals("catchy") && h != null) {
+            if (h.has("mark")) return (int) (h.optDouble("mark") * 1000);
+            // One of the places the catchy part is played, picked at random
+            JSONArray starts = h.optJSONArray("starts");
+            if (starts != null && starts.length() > 0) {
+                return (int) (starts.optDouble(random.nextInt(starts.length())) * 1000);
+            }
+        }
+        return randomSpot(player.getDuration());
     }
 
     // Carries on with a different song from where that song left off (after the fade).
@@ -582,7 +737,7 @@ public class MainActivity extends Activity {
         cancelSwitch();
         if (player != null) {
             if (player.isPlaying()) player.pause();
-            player.seekTo(switchMode && randomStart ? randomSpot(player.getDuration()) : 0);
+            player.seekTo(switchMode && !startAt.equals("resume") ? startPosition(songIndex) : 0);
         }
         state = State.IDLE;
         updateUi();
@@ -711,6 +866,7 @@ public class MainActivity extends Activity {
         positions.clear();
         preparePlayer(0);
         updateUi();
+        if (switchMode && startAt.equals("catchy")) findCatchyParts();
     }
 
     private String songName(Uri uri) {
@@ -735,13 +891,14 @@ public class MainActivity extends Activity {
                 .putBoolean("autoRestart", autoRestart)
                 .putBoolean("switchMode", switchMode)
                 .putInt("switchPause", switchPause)
-                .putBoolean("randomStart", randomStart)
+                .putString("startAt", startAt)
                 .apply();
     }
 
     @Override
     protected void onDestroy() {
         handler.removeCallbacksAndMessages(null);
+        worker.shutdownNow();
         setKeepAlive(false);
         releasePlayer();
         super.onDestroy();

@@ -1,4 +1,5 @@
 const { app, BrowserWindow, dialog, ipcMain, powerSaveBlocker } = require('electron');
+const fs = require('fs');
 const path = require('path');
 const { pathToFileURL } = require('url');
 
@@ -36,6 +37,8 @@ ipcMain.handle('choose-music', async () => {
 });
 
 ipcMain.handle('file-url', (_e, p) => pathToFileURL(p).href);
+
+ipcMain.handle('read-file', (_e, p) => fs.promises.readFile(p));
 
 // Stops the screen and computer from sleeping while a game is running.
 ipcMain.on('keep-awake', (_e, on) => {

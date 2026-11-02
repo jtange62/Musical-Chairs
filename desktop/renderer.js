@@ -38,10 +38,13 @@ let restTime = loadSetting('restTime', 10);
 let autoRestart = loadSetting('autoRestart', true);
 let mode = loadSetting('mode', 'chairs');  // 'chairs' or 'switch'
 let switchPause = loadSetting('switchPause', 3);  // STOP screen between songs, 0 = fade straight over
-let randomStart = loadSetting('randomStart', true);  // "Switch songs": start each song at a random spot
+// "Switch songs": where each song starts - 'catchy' part, 'random' spot, or 'resume' where it left off
+let startAt = loadSetting('startAt', 'catchy');
+// Per song file: { starts: [seconds of the catchy part], mark: seconds chosen by hand }
+let highlights = loadSetting('highlights', {});
 
 function saveSettings() {
-  localStorage.setItem('randomStart', JSON.stringify(randomStart));
+  localStorage.setItem('startAt', JSON.stringify(startAt));
   localStorage.setItem('mode', JSON.stringify(mode));
   localStorage.setItem('switchPause', JSON.stringify(switchPause));
   localStorage.setItem('minPlay', JSON.stringify(minPlay));
@@ -101,12 +104,11 @@ function buildUi() {
     }
   };
 
-  const randomBox = $('random');
-  randomBox.checked = randomStart;
-  randomBox.onchange = () => {
-    randomStart = randomBox.checked;
-    saveSettings();
-  };
+  $('startCatchy').onclick = () => setStartAt('catchy');
+  $('startRandom').onclick = () => setStartAt('random');
+  $('startResume').onclick = () => setStartAt('resume');
+  $('mark').onclick = markSpot;
+  $('unmark').onclick = unmarkSpot;
 
   mainButton.onclick = onMainButton;
   $('reset').onclick = resetGame;
@@ -140,6 +142,7 @@ function setMode(m) {
   saveSettings();
   showMode();
   updateUi();
+  if (mode === 'switch' && startAt === 'catchy') findCatchyParts();
 }
 
 function showMode() {
@@ -151,7 +154,85 @@ function showMode() {
   restRow.hidden = switching;
   pauseRow.hidden = !switching;
   $('autoRow').hidden = switching;
-  $('randomRow').hidden = !switching;
+  $('startRow').hidden = !switching;
+  $('startCatchy').classList.toggle('on', startAt === 'catchy');
+  $('startRandom').classList.toggle('on', startAt === 'random');
+  $('startResume').classList.toggle('on', startAt === 'resume');
+  showMark();
+}
+
+function setStartAt(s) {
+  startAt = s;
+  saveSettings();
+  showMode();
+  if (startAt === 'catchy') findCatchyParts();
+}
+
+// ---------- Catchy parts ----------
+
+let analyzing = null;  // { done, total } while songs are being analyzed
+
+// Analyzes any chosen songs not analyzed yet, one at a time, in the background
+async function findCatchyParts() {
+  if (analyzing) return;
+  const todo = () => songs.filter((p) => !highlights[p] || !highlights[p].starts);
+  analyzing = { done: 0, total: todo().length };
+  updateUi();
+  let path;
+  while ((path = todo()[0])) {
+    let starts = [];
+    try {
+      starts = await analyzeSong(path);
+    } catch (e) {
+      console.error('Could not analyze', path, e);
+    }
+    highlights[path] = { ...highlights[path], starts };
+    try { localStorage.setItem('highlights', JSON.stringify(highlights)); } catch { /* storage full */ }
+    // The first song was cued up before its analysis finished: cue it to the catchy part now
+    if (path === songs[songIndex] && state === 'IDLE' && ready) audio.currentTime = startPosition(songIndex);
+    analyzing.done++;
+    updateUi();
+  }
+  analyzing = null;
+  updateUi();
+}
+
+async function analyzeSong(path) {
+  const bytes = await window.desktop.readFile(path);
+  const ctx = new OfflineAudioContext(1, 1, Highlights.RATE);
+  const buf = await ctx.decodeAudioData(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+  const mono = new Float32Array(buf.length);
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    const data = buf.getChannelData(c);
+    for (let i = 0; i < data.length; i++) mono[i] += data[i] / buf.numberOfChannels;
+  }
+  return Highlights.find(mono, buf.sampleRate).starts;
+}
+
+function showMark() {
+  const song = songs[songIndex];
+  $('markRow').hidden = !(mode === 'switch' && startAt === 'catchy' && ready);
+  $('unmark').hidden = !(song && highlights[song] && highlights[song].mark != null);
+}
+
+// Sets where the current song starts from now on (just before now, to allow for reaction time)
+function markSpot() {
+  if (!ready) return;
+  const song = songs[songIndex];
+  const at = Math.max(0, Math.round((audio.currentTime - 0.3) * 10) / 10);
+  highlights[song] = { ...highlights[song], mark: at };
+  localStorage.setItem('highlights', JSON.stringify(highlights));
+  toast(songTitle(song) + ' will start at ' + formatTime(at));
+  updateUi();
+}
+
+function unmarkSpot() {
+  const song = songs[songIndex];
+  if (!highlights[song]) return;
+  delete highlights[song].mark;
+  localStorage.setItem('highlights', JSON.stringify(highlights));
+  toast(songTitle(song) + ' will start at its catchy part');
+  updateUi();
 }
 
 // Whether the STOP countdown runs by itself ("Switch songs" always moves on)
@@ -201,6 +282,10 @@ function updateUi() {
   songText.textContent = songs.length === 0 ? 'No music chosen'
     : '♪ ' + songName(songs[songIndex]) + (songs.length > 1
       ? '  (' + (songIndex + 1) + '/' + songs.length + ')' : '');
+  if (analyzing && mode === 'switch' && startAt === 'catchy') {
+    songText.textContent += '  ·  finding catchy parts ' + analyzing.done + '/' + analyzing.total + '…';
+  }
+  showMark();
   updateProgress();
 }
 
@@ -296,7 +381,14 @@ function randomSpot(duration) {
 
 // Where song i starts in "Switch songs" mode
 function startPosition(i) {
-  return randomStart ? randomSpot(audio.duration) : positions[i] || 0;
+  if (startAt === 'resume') return positions[i] || 0;
+  const h = highlights[songs[i]];
+  if (startAt === 'catchy' && h) {
+    if (h.mark != null) return h.mark;
+    // One of the places the catchy part is played, picked at random
+    if (h.starts && h.starts.length) return h.starts[Math.floor(Math.random() * h.starts.length)];
+  }
+  return randomSpot(audio.duration);
 }
 
 let fadeTimer = null;
@@ -382,7 +474,7 @@ function resetGame() {
   clearTimeout(tickTimer);
   cancelSwitch();
   audio.pause();
-  if (ready) audio.currentTime = mode === 'switch' && randomStart ? randomSpot(audio.duration) : 0;
+  if (ready) audio.currentTime = mode === 'switch' && startAt !== 'resume' ? startPosition(songIndex) : 0;
   state = 'IDLE';
   updateUi();
 }
@@ -474,6 +566,7 @@ async function pickMusic() {
   positions = [];
   await preparePlayer(0);
   updateUi();
+  if (mode === 'switch' && startAt === 'catchy') findCatchyParts();
 }
 
 function songName(path) {
@@ -491,4 +584,5 @@ songs = loadSetting('songs', []);
 buildUi();
 updateUi();
 if (songs.length > 0) preparePlayer(0).then(updateUi);
+if (mode === 'switch' && startAt === 'catchy') findCatchyParts();
 setInterval(updateProgress, 500);
