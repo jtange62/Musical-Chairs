@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#E53935"/>
+      <stop offset="1" stop-color="#B71C1C"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="url(#bg)"/>
+  <g transform="translate(-22 4)">
+  <!-- chair, front view -->
+  <g fill="#FFFFFF">
+    <rect x="124" y="112" width="32" height="190" rx="12"/>
+    <rect x="290" y="112" width="32" height="190" rx="12"/>
+    <rect x="116" y="104" width="214" height="46" rx="18"/>
+    <rect x="140" y="190" width="166" height="24" rx="10"/>
+    <rect x="98" y="278" width="250" height="48" rx="16"/>
+    <path d="M120 316 H158 L150 440 Q149 450 139 450 H137 Q127 450 126 440 Z"/>
+    <path d="M288 316 H326 L320 440 Q319 450 309 450 H307 Q297 450 296 440 Z"/>
+  </g>
+  <!-- music note -->
+  <g fill="#FFD54F">
+    <ellipse cx="392" cy="236" rx="42" ry="31" transform="rotate(-24 392 236)"/>
+    <rect x="412" y="78" width="21" height="160" rx="8"/>
+    <path d="M420 78 C 448 90, 500 110, 478 184 C 476 144, 450 132, 426 128 Z"/>
+  </g>
+  </g>
+</svg>

@@ -22,3 +22,18 @@ Open this folder in Android Studio → Build → Build App Bundle(s)/APK(s) → 
 ## Install on the phone
 Copy the APK to the phone, tap it, and allow "Install unknown apps" for your
 file manager or browser when Android asks.
+
+# Desktop app (Windows)
+
+The `desktop` folder has the same game as a desktop app (Electron).
+Settings and the chosen songs are remembered between runs. Space bar = the big button.
+
+## Get the .exe from GitHub
+Push to GitHub → **Actions** tab → "Build Windows app" runs automatically →
+download **MusicalChairs-windows** → unzip → run `MusicalChairs-1.0.0.exe`
+(no install needed; Windows may warn because it's unsigned — click "More info" → "Run anyway").
+
+## Run or build it yourself
+Needs Node.js. In the `desktop` folder:
+- `npm install`, then `npm start` to run it
+- `npm run dist` to build `dist/MusicalChairs-1.0.0.exe`

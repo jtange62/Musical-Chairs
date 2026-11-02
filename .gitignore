@@ -5,3 +5,5 @@ local.properties
 *.iml
 signing.keystore
 signing-password.txt
+node_modules/
+dist/

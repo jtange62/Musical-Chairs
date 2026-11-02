@@ -1,0 +1,32 @@
+{
+  "name": "musical-chairs",
+  "productName": "Musical Chairs",
+  "version": "1.0.0",
+  "description": "Plays your music and stops it at a random moment.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win portable"
+  },
+  "build": {
+    "appId": "jp.luana.musicalchairs",
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "renderer.js",
+      "assets/icon.png"
+    ],
+    "win": {
+      "artifactName": "MusicalChairs-${version}.exe",
+      "icon": "assets/icon.png"
+    },
+    "directories": {
+      "buildResources": "assets"
+    }
+  },
+  "devDependencies": {
+    "electron": "45.2.1",
+    "electron-builder": "26.18.0"
+  }
+}
