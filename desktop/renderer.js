@@ -32,16 +32,21 @@ function loadSetting(key, def) {
     return v === null ? def : JSON.parse(v);
   } catch { return def; }
 }
-let minPlay = loadSetting('minPlay', 10);
-let maxPlay = loadSetting('maxPlay', 30);
-let restTime = loadSetting('restTime', 10);
-let autoRestart = loadSetting('autoRestart', true);
-let mode = loadSetting('mode', 'chairs');  // 'chairs' or 'switch'
-let switchPause = loadSetting('switchPause', 3);  // STOP screen between songs, 0 = fade straight over
-// "Switch songs": where each song starts - 'catchy' part, 'random' spot, or 'resume' where it left off
-let startAt = loadSetting('startAt', 'catchy');
-// Per song file: { starts: [seconds of the catchy part], mark: seconds chosen by hand }
-let highlights = loadSetting('highlights', {});
+let minPlay, maxPlay, restTime, autoRestart, mode, switchPause, startAt, highlights;
+// Reads the saved settings; anything not saved gets its default
+function loadSettings() {
+  minPlay = loadSetting('minPlay', 10);
+  maxPlay = loadSetting('maxPlay', 30);
+  restTime = loadSetting('restTime', 10);
+  autoRestart = loadSetting('autoRestart', true);
+  mode = loadSetting('mode', 'chairs');  // 'chairs' or 'switch'
+  switchPause = loadSetting('switchPause', 3);  // STOP screen between songs, 0 = fade straight over
+  // "Switch songs": where each song starts - 'catchy' part, 'random' spot, or 'resume' where it left off
+  startAt = loadSetting('startAt', 'catchy');
+  // Per song file: { starts: [seconds of the catchy part], mark: seconds chosen by hand }
+  highlights = loadSetting('highlights', {});
+}
+loadSettings();
 
 function saveSettings() {
   localStorage.setItem('startAt', JSON.stringify(startAt));
@@ -64,6 +69,8 @@ function toast(msg, ms = 2000) {
   toastTimer = setTimeout(() => t.classList.remove('show'), ms);
 }
 
+const stepperRefreshers = [];  // redraw each stepper's value after a reset to defaults
+
 function stepper(label, get, set, min, max, step) {
   const row = document.createElement('div');
   row.className = 'stepper';
@@ -75,6 +82,7 @@ function stepper(label, get, set, min, max, step) {
   minus.onclick = () => { set(Math.max(min, get() - step)); show(); saveSettings(); };
   plus.onclick = () => { set(Math.min(max, get() + step)); show(); saveSettings(); };
   show();
+  stepperRefreshers.push(show);
   return row;
 }
 
@@ -111,7 +119,9 @@ function buildUi() {
   $('unmark').onclick = unmarkSpot;
 
   mainButton.onclick = onMainButton;
-  $('reset').onclick = resetGame;
+  $('reset').onclick = async () => {
+    if (await window.desktop.confirmReset()) resetToDefaults();
+  };
   $('pick').onclick = pickMusic;
 
   seekBar.addEventListener('input', () => {
@@ -186,8 +196,11 @@ async function findCatchyParts() {
     } catch (e) {
       console.error('Could not analyze', path, e);
     }
-    highlights[path] = { ...highlights[path], starts };
-    try { localStorage.setItem('highlights', JSON.stringify(highlights)); } catch { /* storage full */ }
+    // Skip a song that was cleared by a reset while it was being analyzed
+    if (songs.includes(path)) {
+      highlights[path] = { ...highlights[path], starts };
+      try { localStorage.setItem('highlights', JSON.stringify(highlights)); } catch { /* storage full */ }
+    }
     // The first song was cued up before its analysis finished: cue it to the catchy part now
     if (path === songs[songIndex] && state === 'IDLE' && ready) audio.currentTime = startPosition(songIndex);
     analyzing.done++;
@@ -339,6 +352,7 @@ async function startPlaying() {
     if (!(await preparePlayer(pickNext())) || state !== 'STOPPED') return;
   }
   await preparing;
+  if (songs.length === 0) return;  // reset while the song was loading
   if (!ready && !(await preparePlayer(songIndex))) return;
   audio.volume = 1;
   audio.play().catch(() => {});
@@ -477,6 +491,29 @@ function resetGame() {
   if (ready) audio.currentTime = mode === 'switch' && startAt !== 'resume' ? startPosition(songIndex) : 0;
   state = 'IDLE';
   updateUi();
+}
+
+// The Reset button: back to how the app is on first install - no music, default settings, no saved spots.
+function resetToDefaults() {
+  resetGame();
+  songs = [];
+  songIndex = 0;
+  positions = [];
+  localStorage.clear();
+  loadSettings();
+  // Unload the song once any load in progress has finished
+  preparing = preparing.then(() => {
+    ready = false;
+    audio.removeAttribute('src');
+    audio.load();
+    updateUi();
+    return false;
+  });
+  stepperRefreshers.forEach((show) => show());
+  $('auto').checked = autoRestart;
+  showMode();
+  updateUi();
+  toast('Reset to defaults');
 }
 
 let beepCtx = null;

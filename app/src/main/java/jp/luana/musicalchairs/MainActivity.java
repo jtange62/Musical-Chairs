@@ -1,6 +1,7 @@
 package jp.luana.musicalchairs;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
@@ -100,6 +101,8 @@ public class MainActivity extends Activity {
     private LinearLayout maxRow;
     private LinearLayout restRow;
     private LinearLayout pauseRow;
+    // Redraw each stepper's value after a reset to defaults
+    private final List<Runnable> stepperRefreshers = new ArrayList<>();
     private Switch autoSwitch;
     private LinearLayout startRow;
     private Button startCatchy;
@@ -147,16 +150,7 @@ public class MainActivity extends Activity {
         setVolumeControlStream(AudioManager.STREAM_MUSIC);
 
         prefs = getSharedPreferences("settings", MODE_PRIVATE);
-        minPlay = prefs.getInt("minPlay", 10);
-        maxPlay = prefs.getInt("maxPlay", 30);
-        restTime = prefs.getInt("restTime", 10);
-        autoRestart = prefs.getBoolean("autoRestart", true);
-        switchMode = prefs.getBoolean("switchMode", false);
-        switchPause = prefs.getInt("switchPause", 3);
-        startAt = prefs.getString("startAt", "catchy");
-        try {
-            highlights = new JSONObject(prefs.getString("highlights", "{}"));
-        } catch (JSONException ignored) { }
+        loadSettings();
         String saved = prefs.getString("songs", "");
         if (!saved.isEmpty()) {
             for (String s : saved.split("\n")) songs.add(Uri.parse(s));
@@ -171,6 +165,20 @@ public class MainActivity extends Activity {
         if (!songs.isEmpty()) preparePlayer(0);
         updateUi();
         if (switchMode && startAt.equals("catchy")) findCatchyParts();
+    }
+
+    // Reads the saved settings; anything not saved gets its default
+    private void loadSettings() {
+        minPlay = prefs.getInt("minPlay", 10);
+        maxPlay = prefs.getInt("maxPlay", 30);
+        restTime = prefs.getInt("restTime", 10);
+        autoRestart = prefs.getBoolean("autoRestart", true);
+        switchMode = prefs.getBoolean("switchMode", false);
+        switchPause = prefs.getInt("switchPause", 3);
+        startAt = prefs.getString("startAt", "catchy");
+        try {
+            highlights = new JSONObject(prefs.getString("highlights", "{}"));
+        } catch (JSONException ignored) { }
     }
 
     @Override
@@ -242,6 +250,7 @@ public class MainActivity extends Activity {
         row.addView(minus, new LinearLayout.LayoutParams(dp(56), dp(56)));
         row.addView(value, new LinearLayout.LayoutParams(dp(72), LinearLayout.LayoutParams.WRAP_CONTENT));
         row.addView(plus, new LinearLayout.LayoutParams(dp(56), dp(56)));
+        stepperRefreshers.add(() -> value.setText(getter.get() + " s"));
         return row;
     }
 
@@ -305,7 +314,12 @@ public class MainActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         Button reset = button("Reset", 18);
-        reset.setOnClickListener(v -> resetGame());
+        reset.setOnClickListener(v -> new AlertDialog.Builder(this)
+                .setTitle("Reset everything?")
+                .setMessage("This clears your chosen music, settings and saved song spots. Your music files are not deleted.")
+                .setPositiveButton("Reset", (d, w) -> resetToDefaults())
+                .setNegativeButton("Cancel", null)
+                .show());
         Button pick = button("Choose music", 18);
         pick.setOnClickListener(v -> pickMusic());
         LinearLayout.LayoutParams half = new LinearLayout.LayoutParams(0, dp(64), 1);
@@ -448,7 +462,8 @@ public class MainActivity extends Activity {
                     for (double s : result) {
                         try { starts.put(s); } catch (JSONException ignored) { }
                     }
-                    putHighlight(u, "starts", starts);
+                    // Skip a song that was cleared by a reset while it was being analyzed
+                    if (songs.contains(u)) putHighlight(u, "starts", starts);
                     analyzeDone++;
                     // The first song was cued up before its analysis finished: cue it to the catchy part now
                     if (!songs.isEmpty() && u.equals(songs.get(songIndex)) && state == State.IDLE && player != null) {
@@ -741,6 +756,22 @@ public class MainActivity extends Activity {
         }
         state = State.IDLE;
         updateUi();
+    }
+
+    // The Reset button: back to how the app is on first install - no music, default settings, no saved spots.
+    private void resetToDefaults() {
+        resetGame();
+        releasePlayer();
+        songs.clear();
+        songIndex = 0;
+        positions.clear();
+        prefs.edit().clear().apply();
+        loadSettings();
+        for (Runnable refresh : stepperRefreshers) refresh.run();
+        autoSwitch.setChecked(autoRestart);
+        showMode();
+        updateUi();
+        Toast.makeText(this, "Reset to defaults", Toast.LENGTH_SHORT).show();
     }
 
     // Soft two-note chime ("ding-dong")

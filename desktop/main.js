@@ -36,6 +36,19 @@ ipcMain.handle('choose-music', async () => {
   return result.canceled ? [] : result.filePaths;
 });
 
+ipcMain.handle('confirm-reset', async () => {
+  const result = await dialog.showMessageBox(win, {
+    type: 'warning',
+    title: 'Reset',
+    message: 'Reset everything?',
+    detail: 'This clears your chosen music, settings and saved song spots. Your music files are not deleted.',
+    buttons: ['Reset', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+  });
+  return result.response === 0;
+});
+
 ipcMain.handle('file-url', (_e, p) => pathToFileURL(p).href);
 
 ipcMain.handle('read-file', (_e, p) => fs.promises.readFile(p));
