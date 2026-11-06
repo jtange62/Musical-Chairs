@@ -1,0 +1,163 @@
+{
+  "_about": "Feelings mode content for Musical Chairs. Built from the 'Feelings Activities for Ages 3-6' lesson doc (November Feelings theme). Pure data: no code depends on the field order. Song entries are titles to search for, not files; the teacher picks the actual audio and tags each file with a feeling id.",
+  "version": 1,
+
+  "guessPrompt": "How does this music feel?",
+  "guessHint": "Listen... is it happy? sad? angry? scared?",
+  "revealButton": "Show me!",
+  "nextButton": "Next song",
+
+  "feelings": [
+    {
+      "id": "happy",
+      "word": "happy",
+      "ja": "うれしい",
+      "emoji": "😊",
+      "color": "#F9A825",
+      "textColor": "#212121",
+      "walk": "Skip like you're HAPPY!",
+      "freeze": "Freeze with a HAPPY face!",
+      "voice": "Say \"Good morning!\" in a happy voice!",
+      "reveal": "It's HAPPY music!",
+      "because": "I'm happy because...",
+      "songs": [
+        { "title": "Spring (The Four Seasons, 1st movement)", "composer": "Vivaldi", "note": "Bright and bouncy" },
+        { "title": "Eine kleine Nachtmusik", "composer": "Mozart", "note": "Light skipping music" }
+      ]
+    },
+    {
+      "id": "sad",
+      "word": "sad",
+      "ja": "かなしい",
+      "emoji": "😢",
+      "color": "#1565C0",
+      "textColor": "#FFFFFF",
+      "walk": "Walk slowly like you're SAD.",
+      "freeze": "Freeze with a SAD face!",
+      "voice": "Say \"Apple!\" in a sad voice.",
+      "reveal": "It's SAD music.",
+      "because": "I'm sad because...",
+      "songs": [
+        { "title": "The Swan (Carnival of the Animals)", "composer": "Saint-Saëns", "note": "Gentle and a little sad" },
+        { "title": "Gymnopédie No. 1", "composer": "Satie", "note": "Slow; also works for tired and calm-down" }
+      ]
+    },
+    {
+      "id": "angry",
+      "word": "angry",
+      "ja": "おこっている",
+      "emoji": "😠",
+      "color": "#C62828",
+      "textColor": "#FFFFFF",
+      "walk": "Stomp like you're ANGRY!",
+      "freeze": "Freeze with an ANGRY face!",
+      "voice": "Say your name in an angry voice!",
+      "reveal": "It's ANGRY music!",
+      "because": "I'm angry because...",
+      "calmDown": "Smell the flower... blow out the candle.",
+      "songs": [
+        { "title": "Ride of the Valkyries", "composer": "Wagner", "note": "Big and heavy" },
+        { "title": "In the Hall of the Mountain King (loud ending)", "composer": "Grieg", "note": "Second half builds into stomping" }
+      ]
+    },
+    {
+      "id": "scared",
+      "word": "scared",
+      "ja": "こわい",
+      "emoji": "😨",
+      "color": "#4A148C",
+      "textColor": "#FFFFFF",
+      "walk": "Tiptoe and peek like you're SCARED!",
+      "freeze": "Freeze with a SCARED face!",
+      "voice": "Say \"Hello?\" in a scared voice...",
+      "reveal": "It's SCARY music!",
+      "because": "I'm scared because...",
+      "songs": [
+        { "title": "The Pink Panther Theme", "composer": "Henry Mancini", "note": "The ultimate tiptoe music" },
+        { "title": "In the Hall of the Mountain King (quiet start)", "composer": "Grieg", "note": "Starts quiet and creepy" }
+      ]
+    },
+    {
+      "id": "excited",
+      "word": "excited",
+      "ja": "わくわく",
+      "emoji": "🤩",
+      "color": "#EF6C00",
+      "textColor": "#FFFFFF",
+      "walk": "Run on the spot like you're EXCITED!",
+      "freeze": "Freeze with an EXCITED face!",
+      "voice": "Say \"Birthday!\" in an excited voice!",
+      "reveal": "It's EXCITED music!",
+      "because": "I'm excited because...",
+      "songs": [
+        { "title": "Can-Can (天国と地獄)", "composer": "Offenbach", "note": "Kids know it from 運動会" },
+        { "title": "Comedians' Galop", "composer": "Kabalevsky", "note": "Another 運動会 classic" },
+        { "title": "Flight of the Bumblebee", "composer": "Rimsky-Korsakov", "note": "Frantic and buzzy" }
+      ]
+    },
+    {
+      "id": "tired",
+      "word": "tired",
+      "ja": "つかれた",
+      "emoji": "😴",
+      "color": "#455A64",
+      "textColor": "#FFFFFF",
+      "walk": "Drag your feet like you're TIRED.",
+      "freeze": "Freeze with a TIRED face... yawn!",
+      "voice": "Say \"Good night\" in a tired voice.",
+      "reveal": "It's TIRED music.",
+      "because": "I'm tired because...",
+      "songs": [
+        { "title": "Gymnopédie No. 1", "composer": "Satie", "note": "Slow and sleepy" }
+      ]
+    }
+  ],
+
+  "starterSet": {
+    "_note": "The four-track plan from the lesson doc: about 30 seconds each, guess before reveal.",
+    "feelings": ["happy", "scared", "angry", "sad"],
+    "clipSeconds": 30
+  },
+
+  "sizes": {
+    "_note": "Feelings size: crouch small for 'a little', stretch tall for 'very, very'.",
+    "levels": [
+      { "id": "little", "label": "a little", "action": "Crouch down small!", "example": "a little happy" },
+      { "id": "very", "label": "very", "action": "Stand up tall!", "example": "very happy" },
+      { "id": "veryvery", "label": "very, very", "action": "Stretch up SO tall!", "example": "very, very happy" }
+    ]
+  },
+
+  "animals": {
+    "_note": "Animal walks with Carnival of the Animals, plus feeling + animal combos.",
+    "tracks": [
+      { "id": "elephant", "emoji": "🐘", "walk": "Walk like a big, heavy ELEPHANT!", "song": "The Elephant (Saint-Saëns)" },
+      { "id": "kangaroo", "emoji": "🦘", "walk": "Hop like a KANGAROO!", "song": "Kangaroos (Saint-Saëns)" },
+      { "id": "fish", "emoji": "🐟", "walk": "Float like a FISH!", "song": "Aquarium (Saint-Saëns)" },
+      { "id": "lion", "emoji": "🦁", "walk": "Stomp like a proud LION!", "song": "Royal March of the Lion (Saint-Saëns)" }
+    ],
+    "combos": [
+      { "emoji": "🐶😊", "walk": "Walk like a HAPPY dog!" },
+      { "emoji": "🐶😢", "walk": "Walk like a SAD dog." },
+      { "emoji": "🐱😨", "walk": "Tiptoe like a SCARED cat!" },
+      { "emoji": "🐻😠", "walk": "Stomp like an ANGRY bear!" },
+      { "emoji": "🐰🤩", "walk": "Hop like an EXCITED bunny!" },
+      { "emoji": "🐢😴", "walk": "Crawl like a TIRED turtle." }
+    ]
+  },
+
+  "teddy": {
+    "_note": "'What happened to Teddy?' scenes for the stop screen. Younger kids show the face; older kids try 'He's ___ because...'.",
+    "question": "How does Teddy feel?",
+    "scenes": [
+      { "text": "Teddy dropped his ice cream!", "emoji": "🧸🍦", "feeling": "sad" },
+      { "text": "Teddy got a present!", "emoji": "🧸🎁", "feeling": "happy" },
+      { "text": "Teddy heard a loud noise in the dark!", "emoji": "🧸🌙", "feeling": "scared" },
+      { "text": "Someone took Teddy's toy!", "emoji": "🧸🚗", "feeling": "angry" },
+      { "text": "Today is Teddy's birthday party!", "emoji": "🧸🎂", "feeling": "excited" },
+      { "text": "Teddy played all day long.", "emoji": "🧸🛏️", "feeling": "tired" },
+      { "text": "Teddy's friend came to play!", "emoji": "🧸👫", "feeling": "happy" },
+      { "text": "Teddy's balloon flew away!", "emoji": "🧸🎈", "feeling": "sad" }
+    ]
+  }
+}
