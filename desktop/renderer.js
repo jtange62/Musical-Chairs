@@ -32,7 +32,7 @@ function loadSetting(key, def) {
     return v === null ? def : JSON.parse(v);
   } catch { return def; }
 }
-let minPlay, maxPlay, restTime, autoRestart, mode, switchPause, startAt, highlights, padModes;
+let minPlay, maxPlay, restTime, autoRestart, mode, switchPause, startAt, highlights, padMode;
 // Reads the saved settings; anything not saved gets its default
 function loadSettings() {
   minPlay = loadSetting('minPlay', 10);
@@ -45,8 +45,8 @@ function loadSettings() {
   startAt = loadSetting('startAt', 'catchy');
   // Per song file: { starts: [seconds of the catchy part], mark: seconds chosen by hand }
   highlights = loadSetting('highlights', {});
-  // Sound pads: 'gate' plays only while held; anything else plays all the way through (one-shot)
-  padModes = loadSetting('padModes', []);
+  // Sound pads: 'oneshot' plays all the way through, 'gate' plays only while held
+  padMode = loadSetting('padMode', 'oneshot');
 }
 loadSettings();
 
@@ -574,6 +574,15 @@ function buildPads() {
     editingPads = !editingPads;
     showPads();
   };
+  $('padOneShot').onclick = () => setPadMode('oneshot');
+  $('padHold').onclick = () => setPadMode('gate');
+  showPads();
+}
+
+function setPadMode(m) {
+  for (let i = 0; i < Pads.COUNT; i++) stopGate(i);
+  padMode = m;
+  localStorage.setItem('padMode', JSON.stringify(padMode));
   showPads();
 }
 
@@ -585,13 +594,17 @@ function showPads() {
     b.style.backgroundColor = !rec && pads[i] ? PAD_COLORS[i] : '';
     b.textContent = rec
       ? (rec.starting ? '…' : rec.saving ? 'Saving…' : '● ' + Math.floor((Date.now() - rec.started) / 1000) + 's')
-      : pads[i] ? (padModes[i] === 'gate' ? '✋ ' : '') + (i + 1) : '🎙';
+      : pads[i] ? String(i + 1) : '🎙';
   });
+  $('padOneShot').classList.toggle('on', padMode !== 'gate');
+  $('padHold').classList.toggle('on', padMode === 'gate');
   $('pads').classList.toggle('editing', editingPads);
   $('editPads').textContent = editingPads ? '✓ Done editing' : '✏️ Edit pads';
   $('padsHint').textContent = editingPads
-    ? 'Tap a pad to record it again, switch it between one-shot and ✋ hold, or delete it.'
-    : 'Tap 🎙 to record, tap again to stop. ✋ pads play only while held. Keys 1–8 play the pads.';
+    ? 'Tap a pad to record it again or delete it.'
+    : 'Tap 🎙 to record, tap again to stop. '
+      + (padMode === 'gate' ? 'Pads play only while you hold them.' : 'A tap plays the whole sound.')
+      + ' Keys 1–8 play the pads.';
 }
 
 // A pad (or number key) pressed: open its menu while editing, else play / record / stop recording
@@ -620,7 +633,7 @@ function playPad(i) {
   src.buffer = pads[i];
   src.connect(gain).connect(ctx.destination);
   src.start();
-  if (padModes[i] === 'gate') {
+  if (padMode === 'gate') {
     stopGate(i);
     const sound = { src, gain };
     gateSounds[i] = sound;
@@ -642,28 +655,17 @@ function stopGate(i) {
   sound.src.stop(t + 0.02);
 }
 
-function savePadModes() {
-  localStorage.setItem('padModes', JSON.stringify(padModes));
-}
-
 async function padMenu(i) {
   if (padMenuOpen || recording || !pads[i]) return;
   padMenuOpen = true;
-  const choice = await window.desktop.padMenu(i + 1, padModes[i] === 'gate');
+  const choice = await window.desktop.padMenu(i + 1);
   padMenuOpen = false;
   if (recording || !pads[i]) return;
   if (choice === 'record') {
     startRecording(i);
-  } else if (choice === 'mode') {
-    padModes[i] = padModes[i] === 'gate' ? null : 'gate';
-    savePadModes();
-    toast('Pad ' + (i + 1) + (padModes[i] === 'gate' ? ' plays only while held ✋' : ' plays all the way through'));
-    showPads();
   } else if (choice === 'delete') {
     stopGate(i);
     pads[i] = undefined;
-    padModes[i] = null;
-    savePadModes();
     window.desktop.padDelete(i);
     showPads();
   }

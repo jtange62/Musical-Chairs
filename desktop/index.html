@@ -69,7 +69,8 @@
   #markRow #mark { flex: 3; }
   label.switch { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; font-size: 18px; cursor: pointer; }
   label.switch input { width: 22px; height: 22px; accent-color: #fff; }
-  #pads { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px; }
+  #pads { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  #padModeRow button { height: 40px; font-size: 15px; }
   .pad { height: 64px; font-size: 24px; font-weight: bold; color: #fff; touch-action: none; user-select: none; transition: filter 0.1s, transform 0.1s; }
   .pad.empty { background: rgba(255, 255, 255, 0.18); }
   .pad.empty:hover { background: rgba(255, 255, 255, 0.3); }
@@ -105,6 +106,10 @@
     <button id="pick">Choose music</button>
   </div>
   <h2>Sound pads</h2>
+  <div class="modes" id="padModeRow">
+    <button id="padOneShot">▶ One-shot</button>
+    <button id="padHold">✋ Hold</button>
+  </div>
   <div id="pads"></div>
   <div class="row" id="editRow"><button id="editPads">✏️ Edit pads</button></div>
   <div id="padsHint" class="center"></div>

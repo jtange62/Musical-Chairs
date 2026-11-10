@@ -67,17 +67,16 @@ ipcMain.handle('pad-save', async (_e, i, bytes) => {
 });
 ipcMain.handle('pad-delete', (_e, i) => fs.promises.rm(padFile(i), { force: true }));
 ipcMain.handle('pads-clear', () => fs.promises.rm(padsDir(), { recursive: true, force: true }));
-ipcMain.handle('pad-menu', async (_e, n, gate) => {
+ipcMain.handle('pad-menu', async (_e, n) => {
   const result = await dialog.showMessageBox(win, {
     type: 'question',
     title: 'Sound pad',
     message: `Sound pad ${n}`,
-    detail: gate ? 'Plays only while held (gate).' : 'Plays all the way through (one-shot).',
-    buttons: ['Record again', gate ? 'Play all the way (one-shot)' : 'Play while held (gate)', 'Delete', 'Cancel'],
-    defaultId: 3,
-    cancelId: 3,
+    buttons: ['Record again', 'Delete', 'Cancel'],
+    defaultId: 2,
+    cancelId: 2,
   });
-  return ['record', 'mode', 'delete', null][result.response];
+  return ['record', 'delete', null][result.response];
 });
 
 ipcMain.handle('file-url', (_e, p) => pathToFileURL(p).href);
