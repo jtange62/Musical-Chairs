@@ -128,6 +128,11 @@ public class MainActivity extends Activity {
     private final int[] padSounds = new int[PADS];  // SoundPool sound for each pad, 0 = empty pad
     private SoundPool soundPool;
     private int pendingRecordPad = -1;  // pad to record once the microphone is allowed
+    private final boolean[] padGate = new boolean[PADS];  // true: plays only while held; false: one-shot
+    private final int[] padStreams = new int[PADS];       // the sound playing on each gate pad while held
+    private boolean editingPads = false;  // "Edit pads" is on: a tap opens the pad's menu instead
+    private Button editPadsButton;
+    private TextView padsHint;
 
     // The pad being recorded (the recording thread checks stop/cancel)
     private static final class Recording {
@@ -214,6 +219,9 @@ public class MainActivity extends Activity {
         try {
             highlights = new JSONObject(prefs.getString("highlights", "{}"));
         } catch (JSONException ignored) { }
+        // Sound pad modes, e.g. "01000000" = only pad 2 plays while held
+        String gates = prefs.getString("padGate", "");
+        for (int i = 0; i < PADS; i++) padGate[i] = i < gates.length() && gates.charAt(i) == '1';
     }
 
     @Override
@@ -374,22 +382,26 @@ public class MainActivity extends Activity {
                 Button pad = button("", 22);
                 pad.setTypeface(Typeface.DEFAULT_BOLD);
                 pad.setTextColor(Color.WHITE);
-                // Sounds play the moment the pad is touched; holding a full pad opens its menu
+                // Sounds play the moment the pad is touched (and gate pads stop when it's let go)
                 pad.setOnTouchListener((v, e) -> {
-                    if (e.getActionMasked() == MotionEvent.ACTION_DOWN) padTap(i);
+                    int action = e.getActionMasked();
+                    if (action == MotionEvent.ACTION_DOWN) padDown(i);
+                    else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) stopGate(i);
                     return false;
-                });
-                pad.setOnLongClickListener(v -> {
-                    padMenu(i);
-                    return true;
                 });
                 padButtons[i] = pad;
                 line.addView(pad, new LinearLayout.LayoutParams(0, dp(68), 1));
             }
             root.addView(line);
         }
-        TextView padsHint = text(13, false);
-        padsHint.setText("Tap 🎙 to record, tap again to stop. Hold a pad to record it again or delete it.");
+        editPadsButton = button("", 15);
+        editPadsButton.setOnClickListener(v -> {
+            editingPads = !editingPads;
+            showPads();
+        });
+        root.addView(editPadsButton, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(52)));
+        padsHint = text(13, false);
         padsHint.setAlpha(0.8f);
         root.addView(padsHint);
 
@@ -837,6 +849,8 @@ public class MainActivity extends Activity {
         autoSwitch.setChecked(autoRestart);
         cancelRecording();
         for (int i = 0; i < PADS; i++) deletePad(i);
+        editingPads = false;
+        showPads();
         showMode();
         updateUi();
         Toast.makeText(this, "Reset to defaults", Toast.LENGTH_SHORT).show();
@@ -873,44 +887,87 @@ public class MainActivity extends Activity {
                 label = rec.stop ? "…" : "● " + (SystemClock.uptimeMillis() - rec.started) / 1000 + "s";
             } else if (padSounds[i] != 0) {
                 color = Color.parseColor(PAD_COLORS[i]);
-                label = String.valueOf(i + 1);
+                label = (padGate[i] ? "✋ " : "") + (i + 1);
             } else {
                 color = Color.argb(70, 255, 255, 255);
                 label = "🎙";
             }
             padButtons[i].setBackgroundTintList(ColorStateList.valueOf(color));
             padButtons[i].setText(label);
+            padButtons[i].setAlpha(editingPads ? 0.7f : 1f);
         }
+        editPadsButton.setText(editingPads ? "✓ Done editing" : "✏️ Edit pads");
+        padsHint.setText(editingPads
+                ? "Tap a pad to record it again, switch it between one-shot and ✋ hold, or delete it."
+                : "Tap 🎙 to record, tap again to stop. ✋ pads play only while held.");
     }
 
-    // A tap: play a full pad, record into an empty one, or stop the recording
-    private void padTap(int i) {
+    // A pad touched: open its menu while editing, else play / record / stop recording
+    private void padDown(int i) {
+        if (editingPads && padSounds[i] != 0 && recording == null) {
+            padMenu(i);
+            return;
+        }
         if (recording != null) {
             if (recording.pad == i) stopRecording();
             return;
         }
         if (padSounds[i] != 0) {
-            soundPool.play(padSounds[i], 1f, 1f, 1, 0, 1f);
+            int stream = soundPool.play(padSounds[i], 1f, 1f, 1, 0, 1f);
+            if (padGate[i]) {
+                stopGate(i);
+                padStreams[i] = stream;
+            }
         } else {
             startRecording(i);
         }
     }
 
+    // Stops a gate pad's sound when it's let go, with a very short fade so it doesn't click
+    private void stopGate(int i) {
+        int stream = padStreams[i];
+        if (stream == 0) return;
+        padStreams[i] = 0;
+        soundPool.setVolume(stream, 0.3f, 0.3f);
+        handler.postDelayed(() -> soundPool.stop(stream), 15);
+    }
+
+    private void savePadModes() {
+        StringBuilder sb = new StringBuilder();
+        for (boolean gate : padGate) sb.append(gate ? '1' : '0');
+        prefs.edit().putString("padGate", sb.toString()).apply();
+    }
+
     private void padMenu(int i) {
         if (recording != null || padSounds[i] == 0) return;
+        String modeChoice = padGate[i] ? "Play all the way (one-shot)" : "Play while held (gate)";
         new AlertDialog.Builder(this)
                 .setTitle("Sound pad " + (i + 1))
-                .setItems(new String[]{"Record again", "Delete"}, (d, which) -> {
-                    if (recording != null) return;
-                    if (which == 0) startRecording(i); else deletePad(i);
+                .setItems(new String[]{"Record again", modeChoice, "Delete"}, (d, which) -> {
+                    if (recording != null || padSounds[i] == 0) return;
+                    if (which == 0) {
+                        startRecording(i);
+                    } else if (which == 1) {
+                        padGate[i] = !padGate[i];
+                        savePadModes();
+                        Toast.makeText(this, "Pad " + (i + 1) + (padGate[i]
+                                ? " plays only while held ✋" : " plays all the way through"),
+                                Toast.LENGTH_SHORT).show();
+                        showPads();
+                    } else {
+                        deletePad(i);
+                        savePadModes();
+                    }
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
     }
 
     private void deletePad(int i) {
+        stopGate(i);
         if (padSounds[i] != 0) soundPool.unload(padSounds[i]);
         padSounds[i] = 0;
+        padGate[i] = false;
         padFile(i).delete();
         showPads();
     }

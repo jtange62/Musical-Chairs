@@ -42,9 +42,11 @@ Pick one or several songs with "Choose music"; several songs play in order, one 
 
 **Sound pads** (8 pads under the main buttons): tap an empty 🎙 pad to record
 (up to 10 s), tap it again to stop. The silence before and after is cut off and
-the sound is made louder. Tap a full pad to play it over the music; hold it (or
-right-click on Windows) to record it again or delete it. Keys 1–8 play the pads
-on Windows. Pads are kept between runs; Reset clears them.
+the sound is made louder. Tap a full pad to play it over the music. Each pad is
+**one-shot** (plays all the way through) or **gate ✋** (plays only while held).
+Tap **✏️ Edit pads** (or right-click a pad on Windows), then a pad, to record it
+again, switch its mode, or delete it. Keys 1–8 play the pads on Windows. Pads
+are kept between runs; Reset clears them.
 
 ## Build the APK — option A: GitHub (no installs)
 1. Create a new repository on github.com and upload everything in this folder

@@ -76,6 +76,9 @@
   .pad.rec { background: #D50000; font-size: 18px; animation: pulse 1s infinite; }
   .pad.hit { filter: brightness(1.5); transform: scale(0.95); }
   @keyframes pulse { 50% { opacity: 0.7; } }
+  #pads.editing .pad { outline: 3px dashed rgba(255, 255, 255, 0.85); outline-offset: -6px; }
+  #editRow button { height: 40px; font-size: 15px; background: rgba(255, 255, 255, 0.3); color: #fff; }
+  #editRow button:hover { background: rgba(255, 255, 255, 0.45); }
   #padsHint { font-size: 13px; opacity: 0.8; padding-top: 6px; }
   #toast {
     position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
@@ -103,7 +106,8 @@
   </div>
   <h2>Sound pads</h2>
   <div id="pads"></div>
-  <div id="padsHint" class="center">Tap 🎙 to record, tap again to stop. Hold or right-click a pad to record it again or delete it. Keys 1–8 play the pads.</div>
+  <div class="row" id="editRow"><button id="editPads">✏️ Edit pads</button></div>
+  <div id="padsHint" class="center"></div>
   <h2>Settings</h2>
   <div class="modes">
     <button id="modeChairs">Musical chairs</button>

@@ -32,7 +32,7 @@ function loadSetting(key, def) {
     return v === null ? def : JSON.parse(v);
   } catch { return def; }
 }
-let minPlay, maxPlay, restTime, autoRestart, mode, switchPause, startAt, highlights;
+let minPlay, maxPlay, restTime, autoRestart, mode, switchPause, startAt, highlights, padModes;
 // Reads the saved settings; anything not saved gets its default
 function loadSettings() {
   minPlay = loadSetting('minPlay', 10);
@@ -45,6 +45,8 @@ function loadSettings() {
   startAt = loadSetting('startAt', 'catchy');
   // Per song file: { starts: [seconds of the catchy part], mark: seconds chosen by hand }
   highlights = loadSetting('highlights', {});
+  // Sound pads: 'gate' plays only while held; anything else plays all the way through (one-shot)
+  padModes = loadSetting('padModes', []);
 }
 loadSettings();
 
@@ -144,8 +146,11 @@ function buildUi() {
       onMainButton();
     } else if (/^[1-8]$/.test(e.key)) {
       e.preventDefault();
-      padTap(+e.key - 1);
+      padDown(+e.key - 1);
     }
+  });
+  document.addEventListener('keyup', (e) => {
+    if (/^[1-8]$/.test(e.key)) padUp(+e.key - 1);
   });
 
   buildPads();
@@ -523,7 +528,9 @@ function resetToDefaults() {
   stepperRefreshers.forEach((show) => show());
   $('auto').checked = autoRestart;
   cancelRecording();
+  for (let i = 0; i < Pads.COUNT; i++) stopGate(i);
   pads = [];
+  editingPads = false;
   window.desktop.padsClear();
   showPads();
   showMode();
@@ -537,6 +544,8 @@ const PAD_COLORS = ['#E91E63', '#8E24AA', '#3949AB', '#039BE5', '#00897B', '#7CB
 let pads = [];          // AudioBuffer for each pad, undefined while the pad is empty
 let recording = null;   // the pad being recorded: { pad, starting, stream, recorder, started, saving, cancelled }
 let padMenuOpen = false;
+let editingPads = false;  // "Edit pads" is on: a tap opens the pad's menu instead of playing it
+let gateSounds = [];      // the sound playing on each gate pad while it is held
 let padCtx = null;
 
 function padAudio() {
@@ -550,23 +559,21 @@ function buildPads() {
   for (let i = 0; i < Pads.COUNT; i++) {
     const b = document.createElement('button');
     b.className = 'pad';
-    let hold = null;
-    // Sounds play the moment the pad is pressed; holding a full pad opens its menu
+    // Sounds play the moment the pad is pressed (and gate pads stop when it's let go)
     b.addEventListener('pointerdown', (e) => {
-      if (e.button !== 0) return;
-      const full = !!pads[i] && !recording;
-      padTap(i);
-      clearTimeout(hold);
-      if (full) hold = setTimeout(() => padMenu(i), 600);
+      if (e.button === 0) padDown(i);
     });
-    for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(ev, () => clearTimeout(hold));
+    for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(ev, () => padUp(i));
     b.addEventListener('contextmenu', (e) => {
       e.preventDefault();
-      clearTimeout(hold);
       padMenu(i);
     });
     grid.append(b);
   }
+  $('editPads').onclick = () => {
+    editingPads = !editingPads;
+    showPads();
+  };
   showPads();
 }
 
@@ -578,12 +585,21 @@ function showPads() {
     b.style.backgroundColor = !rec && pads[i] ? PAD_COLORS[i] : '';
     b.textContent = rec
       ? (rec.starting ? '…' : rec.saving ? 'Saving…' : '● ' + Math.floor((Date.now() - rec.started) / 1000) + 's')
-      : pads[i] ? String(i + 1) : '🎙';
+      : pads[i] ? (padModes[i] === 'gate' ? '✋ ' : '') + (i + 1) : '🎙';
   });
+  $('pads').classList.toggle('editing', editingPads);
+  $('editPads').textContent = editingPads ? '✓ Done editing' : '✏️ Edit pads';
+  $('padsHint').textContent = editingPads
+    ? 'Tap a pad to record it again, switch it between one-shot and ✋ hold, or delete it.'
+    : 'Tap 🎙 to record, tap again to stop. ✋ pads play only while held. Keys 1–8 play the pads.';
 }
 
-// A tap (or number key): play a full pad, record into an empty one, or stop the recording
-function padTap(i) {
+// A pad (or number key) pressed: open its menu while editing, else play / record / stop recording
+function padDown(i) {
+  if (editingPads && pads[i] && !recording) {
+    padMenu(i);
+    return;
+  }
   if (recording) {
     if (recording.pad === i) stopRecording();
     return;
@@ -592,27 +608,62 @@ function padTap(i) {
   else startRecording(i);
 }
 
+// A pad (or number key) let go: gate pads stop
+function padUp(i) {
+  stopGate(i);
+}
+
 function playPad(i) {
   const ctx = padAudio();
   const src = ctx.createBufferSource();
+  const gain = ctx.createGain();
   src.buffer = pads[i];
-  src.connect(ctx.destination);
+  src.connect(gain).connect(ctx.destination);
   src.start();
+  if (padModes[i] === 'gate') {
+    stopGate(i);
+    const sound = { src, gain };
+    gateSounds[i] = sound;
+    src.onended = () => { if (gateSounds[i] === sound) gateSounds[i] = null; };
+  }
   const b = $('pads').children[i];
   b.classList.add('hit');
   setTimeout(() => b.classList.remove('hit'), 120);
 }
 
+// Stops a gate pad's sound with a very short fade, so it doesn't click
+function stopGate(i) {
+  const sound = gateSounds[i];
+  if (!sound) return;
+  gateSounds[i] = null;
+  const t = padCtx.currentTime;
+  sound.gain.gain.setValueAtTime(sound.gain.gain.value, t);
+  sound.gain.gain.linearRampToValueAtTime(0, t + 0.015);
+  sound.src.stop(t + 0.02);
+}
+
+function savePadModes() {
+  localStorage.setItem('padModes', JSON.stringify(padModes));
+}
+
 async function padMenu(i) {
   if (padMenuOpen || recording || !pads[i]) return;
   padMenuOpen = true;
-  const choice = await window.desktop.padMenu(i + 1);
+  const choice = await window.desktop.padMenu(i + 1, padModes[i] === 'gate');
   padMenuOpen = false;
-  if (recording) return;
+  if (recording || !pads[i]) return;
   if (choice === 'record') {
     startRecording(i);
+  } else if (choice === 'mode') {
+    padModes[i] = padModes[i] === 'gate' ? null : 'gate';
+    savePadModes();
+    toast('Pad ' + (i + 1) + (padModes[i] === 'gate' ? ' plays only while held ✋' : ' plays all the way through'));
+    showPads();
   } else if (choice === 'delete') {
+    stopGate(i);
     pads[i] = undefined;
+    padModes[i] = null;
+    savePadModes();
     window.desktop.padDelete(i);
     showPads();
   }

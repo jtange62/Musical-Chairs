@@ -10,5 +10,5 @@ contextBridge.exposeInMainWorld('desktop', {
   padSave: (i, bytes) => ipcRenderer.invoke('pad-save', i, bytes),
   padDelete: (i) => ipcRenderer.invoke('pad-delete', i),
   padsClear: () => ipcRenderer.invoke('pads-clear'),
-  padMenu: (n) => ipcRenderer.invoke('pad-menu', n),
+  padMenu: (n, gate) => ipcRenderer.invoke('pad-menu', n, gate),
 });
