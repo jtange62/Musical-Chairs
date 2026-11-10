@@ -44,12 +44,39 @@ ipcMain.handle('confirm-reset', async () => {
     type: 'warning',
     title: 'Reset',
     message: 'Reset everything?',
-    detail: 'This clears your chosen music, settings and saved song spots. Your music files are not deleted.',
+    detail: 'This clears your chosen music, settings, saved song spots and sound pads. Your music files are not deleted.',
     buttons: ['Reset', 'Cancel'],
     defaultId: 1,
     cancelId: 1,
   });
   return result.response === 0;
+});
+
+// Sound pads are saved as pads/pad1.wav ... pad8.wav in the app's settings folder
+const padsDir = () => path.join(app.getPath('userData'), 'pads');
+function padFile(i) {
+  if (!Number.isInteger(i) || i < 0 || i >= 8) throw new Error('No such pad: ' + i);
+  return path.join(padsDir(), `pad${i + 1}.wav`);
+}
+ipcMain.handle('pad-load', async (_e, i) => {
+  try { return await fs.promises.readFile(padFile(i)); } catch { return null; }
+});
+ipcMain.handle('pad-save', async (_e, i, bytes) => {
+  await fs.promises.mkdir(padsDir(), { recursive: true });
+  await fs.promises.writeFile(padFile(i), Buffer.from(bytes));
+});
+ipcMain.handle('pad-delete', (_e, i) => fs.promises.rm(padFile(i), { force: true }));
+ipcMain.handle('pads-clear', () => fs.promises.rm(padsDir(), { recursive: true, force: true }));
+ipcMain.handle('pad-menu', async (_e, n) => {
+  const result = await dialog.showMessageBox(win, {
+    type: 'question',
+    title: 'Sound pad',
+    message: `Sound pad ${n}`,
+    buttons: ['Record again', 'Delete', 'Cancel'],
+    defaultId: 2,
+    cancelId: 2,
+  });
+  return ['record', 'delete', null][result.response];
 });
 
 ipcMain.handle('file-url', (_e, p) => pathToFileURL(p).href);

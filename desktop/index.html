@@ -69,6 +69,14 @@
   #markRow #mark { flex: 3; }
   label.switch { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; font-size: 18px; cursor: pointer; }
   label.switch input { width: 22px; height: 22px; accent-color: #fff; }
+  #pads { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px; }
+  .pad { height: 64px; font-size: 24px; font-weight: bold; color: #fff; touch-action: none; user-select: none; transition: filter 0.1s, transform 0.1s; }
+  .pad.empty { background: rgba(255, 255, 255, 0.18); }
+  .pad.empty:hover { background: rgba(255, 255, 255, 0.3); }
+  .pad.rec { background: #D50000; font-size: 18px; animation: pulse 1s infinite; }
+  .pad.hit { filter: brightness(1.5); transform: scale(0.95); }
+  @keyframes pulse { 50% { opacity: 0.7; } }
+  #padsHint { font-size: 13px; opacity: 0.8; padding-top: 6px; }
   #toast {
     position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
     background: rgba(0, 0, 0, 0.8); padding: 10px 18px; border-radius: 20px;
@@ -93,6 +101,9 @@
     <button id="reset">Reset</button>
     <button id="pick">Choose music</button>
   </div>
+  <h2>Sound pads</h2>
+  <div id="pads"></div>
+  <div id="padsHint" class="center">Tap 🎙 to record, tap again to stop. Hold or right-click a pad to record it again or delete it. Keys 1–8 play the pads.</div>
   <h2>Settings</h2>
   <div class="modes">
     <button id="modeChairs">Musical chairs</button>
@@ -111,6 +122,7 @@
 </div>
 <div id="toast"></div>
 <script src="highlights.js"></script>
+<script src="pads.js"></script>
 <script src="renderer.js"></script>
 </body>
 </html>

@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.database.Cursor;
 import android.graphics.Color;
@@ -11,16 +12,21 @@ import android.graphics.Typeface;
 import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioManager;
+import android.media.AudioRecord;
 import android.media.AudioTrack;
 import android.media.MediaPlayer;
+import android.media.MediaRecorder;
+import android.media.SoundPool;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.provider.OpenableColumns;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
@@ -31,6 +37,8 @@ import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -111,6 +119,32 @@ public class MainActivity extends Activity {
     private LinearLayout markRow;
     private Button unmarkButton;
 
+    // Sound pads
+    private static final int PADS = 8;
+    private static final int RECORD_PERMISSION = 2;
+    private static final String[] PAD_COLORS = {"#E91E63", "#8E24AA", "#3949AB", "#039BE5",
+            "#00897B", "#7CB342", "#FB8C00", "#6D4C41"};
+    private final Button[] padButtons = new Button[PADS];
+    private final int[] padSounds = new int[PADS];  // SoundPool sound for each pad, 0 = empty pad
+    private SoundPool soundPool;
+    private int pendingRecordPad = -1;  // pad to record once the microphone is allowed
+
+    // The pad being recorded (the recording thread checks stop/cancel)
+    private static final class Recording {
+        final int pad;
+        final long started = SystemClock.uptimeMillis();
+        volatile boolean stop;
+        volatile boolean cancel;
+        Recording(int pad) { this.pad = pad; }
+    }
+    private Recording recording;
+    private final Runnable recordTick = new Runnable() {
+        @Override public void run() {
+            showPads();
+            if (recording != null && !recording.stop) handler.postDelayed(this, 250);
+        }
+    };
+
     private final Runnable stopRunnable = this::switchTime;
     private int fadeStep = 0;
     private final Runnable fadeRunnable = new Runnable() {
@@ -162,6 +196,7 @@ public class MainActivity extends Activity {
         }
 
         buildUi();
+        setUpPads();
         if (!songs.isEmpty()) preparePlayer(0);
         updateUi();
         if (switchMode && startAt.equals("catchy")) findCatchyParts();
@@ -316,7 +351,7 @@ public class MainActivity extends Activity {
         Button reset = button("Reset", 18);
         reset.setOnClickListener(v -> new AlertDialog.Builder(this)
                 .setTitle("Reset everything?")
-                .setMessage("This clears your chosen music, settings and saved song spots. Your music files are not deleted.")
+                .setMessage("This clears your chosen music, settings, saved song spots and sound pads. Your music files are not deleted.")
                 .setPositiveButton("Reset", (d, w) -> resetToDefaults())
                 .setNegativeButton("Cancel", null)
                 .show());
@@ -326,6 +361,37 @@ public class MainActivity extends Activity {
         row.addView(reset, half);
         row.addView(pick, new LinearLayout.LayoutParams(0, dp(64), 1));
         root.addView(row);
+
+        TextView padsTitle = text(16, true);
+        padsTitle.setText("Sound pads");
+        padsTitle.setPadding(0, dp(20), 0, dp(4));
+        root.addView(padsTitle);
+        for (int r = 0; r < 2; r++) {
+            LinearLayout line = new LinearLayout(this);
+            line.setOrientation(LinearLayout.HORIZONTAL);
+            for (int c = 0; c < 4; c++) {
+                final int i = r * 4 + c;
+                Button pad = button("", 22);
+                pad.setTypeface(Typeface.DEFAULT_BOLD);
+                pad.setTextColor(Color.WHITE);
+                // Sounds play the moment the pad is touched; holding a full pad opens its menu
+                pad.setOnTouchListener((v, e) -> {
+                    if (e.getActionMasked() == MotionEvent.ACTION_DOWN) padTap(i);
+                    return false;
+                });
+                pad.setOnLongClickListener(v -> {
+                    padMenu(i);
+                    return true;
+                });
+                padButtons[i] = pad;
+                line.addView(pad, new LinearLayout.LayoutParams(0, dp(68), 1));
+            }
+            root.addView(line);
+        }
+        TextView padsHint = text(13, false);
+        padsHint.setText("Tap 🎙 to record, tap again to stop. Hold a pad to record it again or delete it.");
+        padsHint.setAlpha(0.8f);
+        root.addView(padsHint);
 
         TextView settingsTitle = text(16, true);
         settingsTitle.setText("Settings");
@@ -769,9 +835,174 @@ public class MainActivity extends Activity {
         loadSettings();
         for (Runnable refresh : stepperRefreshers) refresh.run();
         autoSwitch.setChecked(autoRestart);
+        cancelRecording();
+        for (int i = 0; i < PADS; i++) deletePad(i);
         showMode();
         updateUi();
         Toast.makeText(this, "Reset to defaults", Toast.LENGTH_SHORT).show();
+    }
+
+    // ---------- Sound pads ----------
+
+    private File padFile(int i) {
+        return new File(new File(getFilesDir(), "pads"), "pad" + (i + 1) + ".wav");
+    }
+
+    private void setUpPads() {
+        soundPool = new SoundPool.Builder()
+                .setMaxStreams(PADS)
+                .setAudioAttributes(new AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build())
+                .build();
+        for (int i = 0; i < PADS; i++) {
+            File f = padFile(i);
+            if (f.exists()) padSounds[i] = soundPool.load(f.getPath(), 1);
+        }
+        showPads();
+    }
+
+    private void showPads() {
+        for (int i = 0; i < PADS; i++) {
+            Recording rec = recording != null && recording.pad == i ? recording : null;
+            int color;
+            String label;
+            if (rec != null) {
+                color = Color.parseColor("#D50000");
+                label = rec.stop ? "…" : "● " + (SystemClock.uptimeMillis() - rec.started) / 1000 + "s";
+            } else if (padSounds[i] != 0) {
+                color = Color.parseColor(PAD_COLORS[i]);
+                label = String.valueOf(i + 1);
+            } else {
+                color = Color.argb(70, 255, 255, 255);
+                label = "🎙";
+            }
+            padButtons[i].setBackgroundTintList(ColorStateList.valueOf(color));
+            padButtons[i].setText(label);
+        }
+    }
+
+    // A tap: play a full pad, record into an empty one, or stop the recording
+    private void padTap(int i) {
+        if (recording != null) {
+            if (recording.pad == i) stopRecording();
+            return;
+        }
+        if (padSounds[i] != 0) {
+            soundPool.play(padSounds[i], 1f, 1f, 1, 0, 1f);
+        } else {
+            startRecording(i);
+        }
+    }
+
+    private void padMenu(int i) {
+        if (recording != null || padSounds[i] == 0) return;
+        new AlertDialog.Builder(this)
+                .setTitle("Sound pad " + (i + 1))
+                .setItems(new String[]{"Record again", "Delete"}, (d, which) -> {
+                    if (recording != null) return;
+                    if (which == 0) startRecording(i); else deletePad(i);
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void deletePad(int i) {
+        if (padSounds[i] != 0) soundPool.unload(padSounds[i]);
+        padSounds[i] = 0;
+        padFile(i).delete();
+        showPads();
+    }
+
+    private void startRecording(int i) {
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            pendingRecordPad = i;
+            requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, RECORD_PERMISSION);
+            return;
+        }
+        final AudioRecord mic;
+        try {
+            int min = AudioRecord.getMinBufferSize(Samples.RATE, AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT);
+            mic = new AudioRecord(MediaRecorder.AudioSource.MIC, Samples.RATE, AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT, Math.max(min, Samples.RATE));
+            if (mic.getState() != AudioRecord.STATE_INITIALIZED) {
+                mic.release();
+                throw new IllegalStateException("microphone not ready");
+            }
+            mic.startRecording();
+        } catch (RuntimeException e) {
+            Toast.makeText(this, "Couldn't use the microphone.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        final Recording rec = new Recording(i);
+        final File file = padFile(i);
+        recording = rec;
+        handler.post(recordTick);
+        new Thread(() -> {
+            short[] pcm = new short[Samples.RATE * Samples.MAX_SECONDS];
+            int n = 0;
+            while (!rec.stop && !rec.cancel && n < pcm.length) {
+                int got = mic.read(pcm, n, Math.min(2048, pcm.length - n));
+                if (got <= 0) break;
+                n += got;
+            }
+            try { mic.stop(); } catch (IllegalStateException ignored) { }
+            mic.release();
+            short[] sound = rec.cancel ? null : Samples.tidy(pcm, n);
+            boolean saved = false;
+            if (sound != null && !rec.cancel) {
+                try {
+                    Samples.writeWav(file, sound);
+                    saved = true;
+                } catch (IOException ignored) { }
+            }
+            final boolean heard = sound != null;
+            final boolean ok = saved;
+            handler.post(() -> finishRecording(rec, heard, ok));
+        }).start();
+    }
+
+    private void stopRecording() {
+        if (recording == null) return;
+        recording.stop = true;
+        showPads();
+    }
+
+    private void finishRecording(Recording rec, boolean heard, boolean saved) {
+        if (recording == rec) recording = null;
+        if (rec.cancel) return;
+        if (!heard) {
+            Toast.makeText(this, "Didn't hear anything. Try again a bit closer to the microphone.",
+                    Toast.LENGTH_LONG).show();
+        } else if (!saved) {
+            Toast.makeText(this, "Couldn't save that sound. Please try again.", Toast.LENGTH_LONG).show();
+        } else {
+            if (padSounds[rec.pad] != 0) soundPool.unload(padSounds[rec.pad]);
+            padSounds[rec.pad] = soundPool.load(padFile(rec.pad).getPath(), 1);
+        }
+        showPads();
+    }
+
+    // Throws away a recording in progress (on reset or when the app closes)
+    private void cancelRecording() {
+        if (recording != null) recording.cancel = true;
+        recording = null;
+        handler.removeCallbacks(recordTick);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode != RECORD_PERMISSION) return;
+        int pad = pendingRecordPad;
+        pendingRecordPad = -1;
+        if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
+            if (pad >= 0 && recording == null) startRecording(pad);
+        } else {
+            Toast.makeText(this, "Sound pads need the microphone to record.", Toast.LENGTH_LONG).show();
+        }
     }
 
     // Soft two-note chime ("ding-dong")
@@ -932,6 +1163,8 @@ public class MainActivity extends Activity {
         worker.shutdownNow();
         setKeepAlive(false);
         releasePlayer();
+        cancelRecording();
+        if (soundPool != null) soundPool.release();
         super.onDestroy();
     }
 }

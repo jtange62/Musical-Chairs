@@ -138,11 +138,17 @@ function buildUi() {
     if (e.target.tagName === 'BUTTON') e.preventDefault();
   });
   document.addEventListener('keydown', (e) => {
-    if (e.code === 'Space' && !e.repeat && e.target.tagName !== 'INPUT') {
+    if (e.repeat || e.target.tagName === 'INPUT') return;
+    if (e.code === 'Space') {
       e.preventDefault();
       onMainButton();
+    } else if (/^[1-8]$/.test(e.key)) {
+      e.preventDefault();
+      padTap(+e.key - 1);
     }
   });
+
+  buildPads();
 }
 
 function setMode(m) {
@@ -214,12 +220,17 @@ async function analyzeSong(path) {
   const bytes = await window.desktop.readFile(path);
   const ctx = new OfflineAudioContext(1, 1, Highlights.RATE);
   const buf = await ctx.decodeAudioData(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+  return Highlights.find(toMono(buf), buf.sampleRate).starts;
+}
+
+// All channels of an AudioBuffer mixed into one
+function toMono(buf) {
   const mono = new Float32Array(buf.length);
   for (let c = 0; c < buf.numberOfChannels; c++) {
     const data = buf.getChannelData(c);
     for (let i = 0; i < data.length; i++) mono[i] += data[i] / buf.numberOfChannels;
   }
-  return Highlights.find(mono, buf.sampleRate).starts;
+  return mono;
 }
 
 function showMark() {
@@ -511,9 +522,193 @@ function resetToDefaults() {
   });
   stepperRefreshers.forEach((show) => show());
   $('auto').checked = autoRestart;
+  cancelRecording();
+  pads = [];
+  window.desktop.padsClear();
+  showPads();
   showMode();
   updateUi();
   toast('Reset to defaults');
+}
+
+// ---------- Sound pads ----------
+
+const PAD_COLORS = ['#E91E63', '#8E24AA', '#3949AB', '#039BE5', '#00897B', '#7CB342', '#FB8C00', '#6D4C41'];
+let pads = [];          // AudioBuffer for each pad, undefined while the pad is empty
+let recording = null;   // the pad being recorded: { pad, starting, stream, recorder, started, saving, cancelled }
+let padMenuOpen = false;
+let padCtx = null;
+
+function padAudio() {
+  padCtx = padCtx || new AudioContext({ latencyHint: 'interactive' });
+  if (padCtx.state === 'suspended') padCtx.resume();
+  return padCtx;
+}
+
+function buildPads() {
+  const grid = $('pads');
+  for (let i = 0; i < Pads.COUNT; i++) {
+    const b = document.createElement('button');
+    b.className = 'pad';
+    let hold = null;
+    // Sounds play the moment the pad is pressed; holding a full pad opens its menu
+    b.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      const full = !!pads[i] && !recording;
+      padTap(i);
+      clearTimeout(hold);
+      if (full) hold = setTimeout(() => padMenu(i), 600);
+    });
+    for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(ev, () => clearTimeout(hold));
+    b.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      clearTimeout(hold);
+      padMenu(i);
+    });
+    grid.append(b);
+  }
+  showPads();
+}
+
+function showPads() {
+  $('pads').querySelectorAll('.pad').forEach((b, i) => {
+    const rec = recording && recording.pad === i ? recording : null;
+    b.classList.toggle('rec', !!rec);
+    b.classList.toggle('empty', !rec && !pads[i]);
+    b.style.backgroundColor = !rec && pads[i] ? PAD_COLORS[i] : '';
+    b.textContent = rec
+      ? (rec.starting ? '…' : rec.saving ? 'Saving…' : '● ' + Math.floor((Date.now() - rec.started) / 1000) + 's')
+      : pads[i] ? String(i + 1) : '🎙';
+  });
+}
+
+// A tap (or number key): play a full pad, record into an empty one, or stop the recording
+function padTap(i) {
+  if (recording) {
+    if (recording.pad === i) stopRecording();
+    return;
+  }
+  if (pads[i]) playPad(i);
+  else startRecording(i);
+}
+
+function playPad(i) {
+  const ctx = padAudio();
+  const src = ctx.createBufferSource();
+  src.buffer = pads[i];
+  src.connect(ctx.destination);
+  src.start();
+  const b = $('pads').children[i];
+  b.classList.add('hit');
+  setTimeout(() => b.classList.remove('hit'), 120);
+}
+
+async function padMenu(i) {
+  if (padMenuOpen || recording || !pads[i]) return;
+  padMenuOpen = true;
+  const choice = await window.desktop.padMenu(i + 1);
+  padMenuOpen = false;
+  if (recording) return;
+  if (choice === 'record') {
+    startRecording(i);
+  } else if (choice === 'delete') {
+    pads[i] = undefined;
+    window.desktop.padDelete(i);
+    showPads();
+  }
+}
+
+async function startRecording(i) {
+  const rec = { pad: i, starting: true };
+  recording = rec;
+  showPads();
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      // Raw sound: no echo cancelling (it would cut out the music being recorded)
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+    });
+  } catch (e) {
+    console.error('Microphone', e);
+    if (recording === rec) recording = null;
+    showPads();
+    toast("Couldn't use the microphone. Check that Windows lets apps use it.", 3500);
+    return;
+  }
+  if (rec.cancelled) {
+    stream.getTracks().forEach((t) => t.stop());
+    return;
+  }
+  const chunks = [];
+  rec.stream = stream;
+  rec.recorder = new MediaRecorder(stream);
+  rec.recorder.ondataavailable = (e) => chunks.push(e.data);
+  rec.recorder.onstop = () => finishRecording(rec, chunks);
+  rec.recorder.start();
+  rec.started = Date.now();
+  rec.starting = false;
+  rec.ticker = setInterval(showPads, 250);
+  rec.limit = setTimeout(stopRecording, Pads.MAX_SECONDS * 1000);
+  showPads();
+}
+
+function stopRecording() {
+  const rec = recording;
+  if (!rec || !rec.recorder || rec.saving) return;
+  rec.saving = true;
+  clearInterval(rec.ticker);
+  clearTimeout(rec.limit);
+  rec.recorder.stop();
+  showPads();
+}
+
+async function finishRecording(rec, chunks) {
+  rec.stream.getTracks().forEach((t) => t.stop());
+  if (rec.cancelled) return;
+  try {
+    const ctx = padAudio();
+    const decoded = await ctx.decodeAudioData(await new Blob(chunks).arrayBuffer());
+    const sound = Pads.tidy(toMono(decoded), decoded.sampleRate);
+    if (rec.cancelled) return;
+    if (!sound) {
+      toast("Didn't hear anything. Try again a bit closer to the microphone.", 3000);
+    } else {
+      const buf = ctx.createBuffer(1, sound.length, decoded.sampleRate);
+      buf.copyToChannel(sound, 0);
+      pads[rec.pad] = buf;
+      await window.desktop.padSave(rec.pad, Pads.wav(sound, decoded.sampleRate));
+      if (rec.cancelled) window.desktop.padDelete(rec.pad);  // reset while saving
+    }
+  } catch (e) {
+    console.error('Recording', e);
+    toast("Couldn't save that sound. Please try again.", 3000);
+  }
+  if (recording === rec) recording = null;
+  showPads();
+}
+
+// Throws away a recording in progress (on reset)
+function cancelRecording() {
+  const rec = recording;
+  if (!rec) return;
+  rec.cancelled = true;
+  clearInterval(rec.ticker);
+  clearTimeout(rec.limit);
+  if (rec.recorder && rec.recorder.state !== 'inactive') rec.recorder.stop();
+  recording = null;
+}
+
+async function loadPads() {
+  for (let i = 0; i < Pads.COUNT; i++) {
+    const bytes = await window.desktop.padLoad(i);
+    if (!bytes) continue;
+    try {
+      pads[i] = await padAudio().decodeAudioData(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+    } catch (e) {
+      console.error('Could not load pad', i + 1, e);
+    }
+  }
+  showPads();
 }
 
 let beepCtx = null;
@@ -622,4 +817,5 @@ buildUi();
 updateUi();
 if (songs.length > 0) preparePlayer(0).then(updateUi);
 if (mode === 'switch' && startAt === 'catchy') findCatchyParts();
+loadPads();
 setInterval(updateProgress, 500);
