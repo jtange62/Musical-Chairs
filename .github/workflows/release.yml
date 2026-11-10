@@ -1,0 +1,38 @@
+name: Release
+
+# Pushing a tag like v1.2 builds the classroom app and publishes it on the Releases page.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    uses: ./.github/workflows/build-apk.yml
+    secrets: inherit
+  windows:
+    uses: ./.github/workflows/build-desktop.yml
+  publish:
+    needs: [apk, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Name the files
+        run: |
+          mv out/*.apk "out/MusicalChairs-${GITHUB_REF_NAME}.apk"
+          mv out/*.exe "out/MusicalChairs-${GITHUB_REF_NAME}.exe"
+          ls -l out
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Musical Chairs ${{ github.ref_name }}
+          files: out/*
+          body: |
+            The classroom version of Musical Chairs.
+
+            - **Android:** download the `.apk` below on the tablet or phone, tap it, and allow installing when asked. It installs over the old version and keeps your music and settings.
+            - **Windows:** download the `.exe` below and run it (no install needed). If Windows warns, click "More info" → "Run anyway".

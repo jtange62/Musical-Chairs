@@ -3,6 +3,26 @@
 Plays your music, stops it at a random moment (big red STOP screen + beep),
 waits a set number of seconds, then starts the music again by itself.
 
+## Classroom version and Lab (experimental) versions
+
+| | Classroom version | Lab version |
+|---|---|---|
+| Made from | the `main` branch | any other branch (one per experiment) |
+| App name | **Musical Chairs** | **Lab: Musical Chairs** (Android), **Musical Chairs Lab** (Windows) |
+| Download | [Releases page](https://github.com/jtange62/Musical-Chairs/releases) (permanent, no sign-in) | that branch's run in the **Actions** tab (sign in; kept for 90 days) |
+
+- The two are separate apps: both can be installed on the same tablet or PC, and
+  each has its own music list and settings. Trying an experiment never touches
+  the classroom app.
+- **New experiment:** make a branch (e.g. `feelings-mode`) and push it. GitHub
+  builds `MusicalChairsLab-apk` and `MusicalChairsLab-windows` for it.
+- **Experiment worked out:** merge the branch into `main`, then publish a release.
+- **Publish a release:** bump the version (`versionCode`/`versionName` in
+  `app/build.gradle`, `version` in `desktop/package.json`), then push a tag
+  named after it, e.g. `git tag v1.2 && git push origin v1.2`. GitHub builds the
+  classroom app and puts the `.apk` and `.exe` on the Releases page. Older
+  releases stay there, so you can always go back.
+
 ## Settings (saved on the phone)
 - Music plays at least / at most — the random stop lands somewhere in this range
 - Stop time before restart — the countdown on the red screen
@@ -25,6 +45,7 @@ Pick one or several songs with "Choose music"; several songs play in order, one 
    (keep the hidden `.github` folder).
 2. Open the repo's **Actions** tab → "Build APK" runs automatically (~3 min).
 3. Open the finished run → download **MusicalChairs-apk** → unzip → `app-debug.apk`.
+   (Or get the classroom version from the [Releases page](https://github.com/jtange62/Musical-Chairs/releases).)
 
 ## Option B: Android Studio
 Open this folder in Android Studio → Build → Build App Bundle(s)/APK(s) → Build APK(s).
@@ -48,11 +69,11 @@ Choose 2 or more songs. "Stop between songs" sets how long the beep + STOP
 screen lasts before the next song (0 = fade straight over).
 
 ## Get the .exe from GitHub
-Push to GitHub → **Actions** tab → "Build Windows app" runs automatically →
-download **MusicalChairs-windows** → unzip → run `MusicalChairs-1.0.0.exe`
-(no install needed; Windows may warn because it's unsigned — click "More info" → "Run anyway").
+Download it from the [Releases page](https://github.com/jtange62/Musical-Chairs/releases)
+and run it (no install needed; Windows may warn because it's unsigned — click
+"More info" → "Run anyway"). Builds of each push are also in the **Actions** tab.
 
 ## Run or build it yourself
 Needs Node.js. In the `desktop` folder:
 - `npm install`, then `npm start` to run it
-- `npm run dist` to build `dist/MusicalChairs-1.0.0.exe`
+- `npm run dist` to build `dist/MusicalChairs-<version>.exe`

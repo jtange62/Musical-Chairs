@@ -31,7 +31,7 @@ public class KeepAliveService extends Service {
         }
         PendingIntent open = PendingIntent.getActivity(this, 0,
                 new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE);
-        Notification n = b.setContentTitle("Musical Chairs")
+        Notification n = b.setContentTitle(getApplicationInfo().loadLabel(getPackageManager()))
                 .setContentText("Game in progress")
                 .setSmallIcon(android.R.drawable.ic_media_play)
                 .setContentIntent(open)

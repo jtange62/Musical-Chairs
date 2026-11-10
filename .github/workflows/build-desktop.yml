@@ -2,7 +2,13 @@ name: Build Windows app
 
 on:
   push:
+    branches: ['**']  # release tags are built by release.yml
   workflow_dispatch:
+  workflow_call:
+
+env:
+  # Anything not built from main or a release tag is an experiment: the "Lab" app
+  LAB: ${{ github.ref_type != 'tag' && github.ref_name != 'main' }}
 
 jobs:
   build:
@@ -18,8 +24,15 @@ jobs:
           cache: npm
           cache-dependency-path: desktop/package-lock.json
       - run: npm ci
-      - run: npm run dist
+      - name: Build
+        run: |
+          if ($env:LAB -eq 'true') {
+            # Its own name and ID, so it keeps its own settings apart from the classroom app
+            npx electron-builder --win portable "--config.appId=jp.luana.musicalchairs.lab" "--config.productName=Musical Chairs Lab" "--config.extraMetadata.productName=Musical Chairs Lab" '--config.win.artifactName=MusicalChairsLab-${version}.exe'
+          } else {
+            npm run dist
+          }
       - uses: actions/upload-artifact@v4
         with:
-          name: MusicalChairs-windows
+          name: ${{ env.LAB == 'true' && 'MusicalChairsLab-windows' || 'MusicalChairs-windows' }}
           path: desktop/dist/*.exe

@@ -6,12 +6,20 @@ android {
     namespace 'jp.luana.musicalchairs'
     compileSdk 34
 
+    // Experimental builds (LAB=true, set by GitHub for every branch except main) install as a
+    // separate "Lab" app next to the classroom app, with their own settings and music list.
+    def lab = System.getenv('LAB') == 'true'
+
     defaultConfig {
-        applicationId 'jp.luana.musicalchairs'
+        applicationId lab ? 'jp.luana.musicalchairs.lab' : 'jp.luana.musicalchairs'
+        manifestPlaceholders = [
+            appLabel: lab ? 'Lab: Musical Chairs' : 'Musical Chairs',
+            appIcon : lab ? '@android:drawable/ic_media_ff' : '@android:drawable/ic_media_play',
+        ]
         minSdk 24
         targetSdk 34
-        versionCode 1
-        versionName '1.0'
+        versionCode 2
+        versionName '1.1'
     }
 
     // Sign every build with the same key so new APKs install over old ones.

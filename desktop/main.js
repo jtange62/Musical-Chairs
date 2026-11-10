@@ -21,6 +21,9 @@ function createWindow() {
       backgroundThrottling: false,
     },
   });
+  // The title bar shows the app's name, so a Lab build says "Musical Chairs Lab"
+  win.on('page-title-updated', (e) => e.preventDefault());
+  win.setTitle(app.getName());
   win.loadFile(path.join(__dirname, 'index.html'));
 }
 

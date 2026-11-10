@@ -1,7 +1,7 @@
 {
   "name": "musical-chairs",
   "productName": "Musical Chairs",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Plays your music and stops it at a random moment.",
   "main": "main.js",
   "scripts": {

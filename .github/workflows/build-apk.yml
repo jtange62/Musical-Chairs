@@ -2,7 +2,13 @@ name: Build APK
 
 on:
   push:
+    branches: ['**']  # release tags are built by release.yml
   workflow_dispatch:
+  workflow_call:
+
+env:
+  # Anything not built from main or a release tag is an experiment: the "Lab" app
+  LAB: ${{ github.ref_type != 'tag' && github.ref_name != 'main' }}
 
 jobs:
   build:
@@ -28,5 +34,5 @@ jobs:
         run: gradle assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: MusicalChairs-apk
+          name: ${{ env.LAB == 'true' && 'MusicalChairsLab-apk' || 'MusicalChairs-apk' }}
           path: app/build/outputs/apk/debug/*.apk
