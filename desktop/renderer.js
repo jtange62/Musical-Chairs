@@ -32,7 +32,7 @@ function loadSetting(key, def) {
     return v === null ? def : JSON.parse(v);
   } catch { return def; }
 }
-let minPlay, maxPlay, restTime, autoRestart, mode, switchPause, startAt, highlights, sayWords, words;
+let minPlay, maxPlay, restTime, autoRestart, mode, switchPause, startAt, highlights, sayWords, words, voiceName;
 // Reads the saved settings; anything not saved gets its default
 function loadSettings() {
   minPlay = loadSetting('minPlay', 10);
@@ -48,6 +48,7 @@ function loadSettings() {
   // At each stop, a voice says a random word from the list
   sayWords = loadSetting('sayWords', true);
   words = loadSetting('words', 'happy, sad, angry, scared, surprised, silly, sleepy');
+  voiceName = loadSetting('voiceName', null);  // null = an English voice picked automatically
 }
 loadSettings();
 
@@ -61,6 +62,7 @@ function saveSettings() {
   localStorage.setItem('autoRestart', JSON.stringify(autoRestart));
   localStorage.setItem('sayWords', JSON.stringify(sayWords));
   localStorage.setItem('words', JSON.stringify(words));
+  localStorage.setItem('voiceName', JSON.stringify(voiceName));
 }
 
 // ---------- UI ----------
@@ -122,6 +124,11 @@ function buildUi() {
   say.onchange = () => { sayWords = say.checked; saveSettings(); showWords(); };
   $('words').value = words;
   $('words').oninput = () => { words = $('words').value; saveSettings(); };
+  $('voice').onchange = () => { voiceName = $('voice').value || null; saveSettings(); tryVoice(); };
+  $('tryVoice').onclick = tryVoice;
+  // Windows lists its voices a moment after the app opens
+  speechSynthesis.onvoiceschanged = showVoices;
+  showVoices();
   showWords();
 
   $('startCatchy').onclick = () => setStartAt('catchy');
@@ -150,7 +157,7 @@ function buildUi() {
     if (e.target.tagName === 'BUTTON') e.preventDefault();
   });
   document.addEventListener('keydown', (e) => {
-    if (e.code === 'Space' && !e.repeat && e.target.tagName !== 'INPUT') {
+    if (e.code === 'Space' && !e.repeat && e.target.tagName !== 'INPUT' && e.target.tagName !== 'SELECT') {
       e.preventDefault();
       onMainButton();
     }
@@ -281,17 +288,38 @@ function pickWord() {
   return others[Math.floor(Math.random() * others.length)];
 }
 
-// An English voice, even if Windows is set to another language
-function englishVoice() {
-  const voices = speechSynthesis.getVoices().filter((v) => v.lang.startsWith('en'));
+// The chosen voice, or else an English one, even if Windows is set to another language
+function chosenVoice() {
+  const all = speechSynthesis.getVoices();
+  const chosen = all.find((v) => v.name === voiceName);
+  if (chosen) return chosen;
+  const voices = all.filter((v) => v.lang.startsWith('en'));
   return voices.find((v) => v.default) || voices.find((v) => /zira/i.test(v.name)) || voices[0] || null;
+}
+
+// Fills the Voice menu: English voices first, then the others
+function showVoices() {
+  const menu = $('voice');
+  const voices = speechSynthesis.getVoices().slice()
+    .sort((a, b) => b.lang.startsWith('en') - a.lang.startsWith('en'));
+  menu.replaceChildren(new Option('Automatic (English)', ''));
+  for (const v of voices) {
+    // "Microsoft Zira - English (United States)" -> "Zira - English (United States)"
+    menu.add(new Option(v.name.replace(/^Microsoft /, ''), v.name));
+  }
+  menu.value = voices.some((v) => v.name === voiceName) ? voiceName : '';
+}
+
+function tryVoice() {
+  stopSpeaking();
+  sayWord(pickWord() || 'happy');
 }
 
 function sayWord(word) {
   try {
     const u = new SpeechSynthesisUtterance(word);
-    u.voice = englishVoice();
-    u.lang = 'en-US';
+    u.voice = chosenVoice();
+    if (u.voice) u.lang = u.voice.lang;
     u.rate = 0.85;  // a little slow, for young children
     speechSynthesis.speak(u);
   } catch { /* no voice available */ }
@@ -572,6 +600,7 @@ function resetToDefaults() {
   $('auto').checked = autoRestart;
   $('say').checked = sayWords;
   $('words').value = words;
+  showVoices();
   showWords();
   showMode();
   updateUi();
