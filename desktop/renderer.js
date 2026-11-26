@@ -32,7 +32,7 @@ function loadSetting(key, def) {
     return v === null ? def : JSON.parse(v);
   } catch { return def; }
 }
-let minPlay, maxPlay, restTime, autoRestart, mode, switchPause, startAt, highlights;
+let minPlay, maxPlay, restTime, autoRestart, mode, switchPause, startAt, highlights, pictureFolder;
 // Reads the saved settings; anything not saved gets its default
 function loadSettings() {
   minPlay = loadSetting('minPlay', 10);
@@ -45,6 +45,7 @@ function loadSettings() {
   startAt = loadSetting('startAt', 'catchy');
   // Per song file: { starts: [seconds of the catchy part], mark: seconds chosen by hand }
   highlights = loadSetting('highlights', {});
+  pictureFolder = loadSetting('pictureFolder', null);  // freeze pictures folder, null = off
 }
 loadSettings();
 
@@ -56,6 +57,7 @@ function saveSettings() {
   localStorage.setItem('maxPlay', JSON.stringify(maxPlay));
   localStorage.setItem('restTime', JSON.stringify(restTime));
   localStorage.setItem('autoRestart', JSON.stringify(autoRestart));
+  localStorage.setItem('pictureFolder', JSON.stringify(pictureFolder));
 }
 
 // ---------- UI ----------
@@ -111,6 +113,10 @@ function buildUi() {
       updateUi();
     }
   };
+
+  $('picChoose').onclick = choosePictures;
+  $('picOff').onclick = () => { pictureFolder = null; saveSettings(); loadPictures(); };
+  $('freezePlay').onclick = onMainButton;
 
   $('startCatchy').onclick = () => setStartAt('catchy');
   $('startRandom').onclick = () => setStartAt('random');
@@ -248,6 +254,40 @@ function unmarkSpot() {
   updateUi();
 }
 
+// ---------- Freeze pictures ----------
+
+let pictures = [];      // file URLs of the pictures in the chosen folder
+let freezePic = null;   // the picture shown on this STOP screen
+
+async function choosePictures() {
+  const folder = await window.desktop.choosePictureFolder();
+  if (!folder) return;
+  pictureFolder = folder;
+  saveSettings();
+  await loadPictures();
+  if (pictures.length === 0) toast('No pictures in that folder', 3000);
+}
+
+// Reads the folder again each time, so pictures added to it show up
+async function loadPictures() {
+  pictures = pictureFolder ? await window.desktop.listPictures(pictureFolder) : [];
+  showPictures();
+}
+
+function showPictures() {
+  const folderName = pictureFolder ? pictureFolder.split(/[\\/]/).pop() : '';
+  $('picName').textContent = !pictureFolder ? 'Freeze pictures: off'
+    : 'Freeze pictures: ' + folderName + ' (' + pictures.length + ')';
+  $('picOff').hidden = !pictureFolder;
+}
+
+// A random picture, not the same one twice in a row
+function pickPicture() {
+  if (pictures.length === 0) return null;
+  const others = pictures.length > 1 ? pictures.filter((p) => p !== freezePic) : pictures;
+  return others[Math.floor(Math.random() * others.length)];
+}
+
 // Whether the STOP countdown runs by itself ("Switch songs" always moves on)
 function autoNext() {
   return mode === 'switch' || autoRestart;
@@ -277,6 +317,10 @@ function updateUi() {
         ? (mode === 'switch' ? 'Next song in ' : 'Music in ') + countdown + '…'
         : 'Press “Play now” when ready';
       mainButton.textContent = 'Play now';
+      if (freezePic) {
+        $('freezeImg').src = freezePic;
+        $('freezeSub').textContent = subText.textContent;
+      }
       break;
     case 'PAUSED':
       bg = COLOR_PAUSE;
@@ -292,6 +336,7 @@ function updateUi() {
       mainButton.textContent = 'Start';
   }
   document.body.style.backgroundColor = bg;
+  $('freeze').hidden = !(state === 'STOPPED' && freezePic);
   songText.textContent = songs.length === 0 ? 'No music chosen'
     : '♪ ' + songName(songs[songIndex]) + (songs.length > 1
       ? '  (' + (songIndex + 1) + '/' + songs.length + ')' : '');
@@ -444,6 +489,7 @@ function doStop() {
   audio.pause();
   if (mode === 'switch') savePosition();
   beep();
+  freezePic = pickPicture();
   state = 'STOPPED';
   countdown = mode === 'switch' ? switchPause : restTime;
   updateUi();
@@ -501,6 +547,7 @@ function resetToDefaults() {
   positions = [];
   localStorage.clear();
   loadSettings();
+  loadPictures();
   // Unload the song once any load in progress has finished
   preparing = preparing.then(() => {
     ready = false;
@@ -620,6 +667,7 @@ function songTitle(path) {
 songs = loadSetting('songs', []);
 buildUi();
 updateUi();
+loadPictures();
 if (songs.length > 0) preparePlayer(0).then(updateUi);
 if (mode === 'switch' && startAt === 'catchy') findCatchyParts();
 setInterval(updateProgress, 500);

@@ -39,6 +39,29 @@ ipcMain.handle('choose-music', async () => {
   return result.canceled ? [] : result.filePaths;
 });
 
+ipcMain.handle('choose-picture-folder', async () => {
+  const result = await dialog.showOpenDialog(win, {
+    title: 'Choose a folder of freeze pictures',
+    properties: ['openDirectory'],
+  });
+  return result.canceled ? null : result.filePaths[0];
+});
+
+const PICTURE_TYPES = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'];
+
+// The pictures in a folder, as file URLs (an empty list if the folder is gone)
+ipcMain.handle('list-pictures', async (_e, folder) => {
+  try {
+    const names = await fs.promises.readdir(folder);
+    return names
+      .filter((n) => PICTURE_TYPES.includes(path.extname(n).toLowerCase()))
+      .sort()
+      .map((n) => pathToFileURL(path.join(folder, n)).href);
+  } catch {
+    return [];
+  }
+});
+
 ipcMain.handle('confirm-reset', async () => {
   const result = await dialog.showMessageBox(win, {
     type: 'warning',
