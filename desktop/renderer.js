@@ -32,7 +32,7 @@ function loadSetting(key, def) {
     return v === null ? def : JSON.parse(v);
   } catch { return def; }
 }
-let minPlay, maxPlay, restTime, autoRestart, mode, switchPause, startAt, highlights;
+let minPlay, maxPlay, restTime, autoRestart, mode, switchPause, startAt, highlights, sayWords, words;
 // Reads the saved settings; anything not saved gets its default
 function loadSettings() {
   minPlay = loadSetting('minPlay', 10);
@@ -45,6 +45,9 @@ function loadSettings() {
   startAt = loadSetting('startAt', 'catchy');
   // Per song file: { starts: [seconds of the catchy part], mark: seconds chosen by hand }
   highlights = loadSetting('highlights', {});
+  // At each stop, a voice says a random word from the list
+  sayWords = loadSetting('sayWords', true);
+  words = loadSetting('words', 'happy, sad, angry, scared, surprised, silly, sleepy');
 }
 loadSettings();
 
@@ -56,6 +59,8 @@ function saveSettings() {
   localStorage.setItem('maxPlay', JSON.stringify(maxPlay));
   localStorage.setItem('restTime', JSON.stringify(restTime));
   localStorage.setItem('autoRestart', JSON.stringify(autoRestart));
+  localStorage.setItem('sayWords', JSON.stringify(sayWords));
+  localStorage.setItem('words', JSON.stringify(words));
 }
 
 // ---------- UI ----------
@@ -111,6 +116,13 @@ function buildUi() {
       updateUi();
     }
   };
+
+  const say = $('say');
+  say.checked = sayWords;
+  say.onchange = () => { sayWords = say.checked; saveSettings(); showWords(); };
+  $('words').value = words;
+  $('words').oninput = () => { words = $('words').value; saveSettings(); };
+  showWords();
 
   $('startCatchy').onclick = () => setStartAt('catchy');
   $('startRandom').onclick = () => setStartAt('random');
@@ -248,6 +260,48 @@ function unmarkSpot() {
   updateUi();
 }
 
+// ---------- Word at the stop ----------
+
+let stopWord = null;   // the word said at this stop
+let sayTimer = null;
+
+function showWords() {
+  $('wordsRow').hidden = !sayWords;
+}
+
+function wordList() {
+  return words.split(',').map((w) => w.trim()).filter((w) => w);
+}
+
+// A random word from the list, not the same one twice in a row
+function pickWord() {
+  const list = wordList();
+  if (list.length === 0) return null;
+  const others = list.length > 1 ? list.filter((w) => w !== stopWord) : list;
+  return others[Math.floor(Math.random() * others.length)];
+}
+
+// An English voice, even if Windows is set to another language
+function englishVoice() {
+  const voices = speechSynthesis.getVoices().filter((v) => v.lang.startsWith('en'));
+  return voices.find((v) => v.default) || voices.find((v) => /zira/i.test(v.name)) || voices[0] || null;
+}
+
+function sayWord(word) {
+  try {
+    const u = new SpeechSynthesisUtterance(word);
+    u.voice = englishVoice();
+    u.lang = 'en-US';
+    u.rate = 0.85;  // a little slow, for young children
+    speechSynthesis.speak(u);
+  } catch { /* no voice available */ }
+}
+
+function stopSpeaking() {
+  clearTimeout(sayTimer);
+  try { speechSynthesis.cancel(); } catch { /* no voice available */ }
+}
+
 // Whether the STOP countdown runs by itself ("Switch songs" always moves on)
 function autoNext() {
   return mode === 'switch' || autoRestart;
@@ -272,7 +326,7 @@ function updateUi() {
       break;
     case 'STOPPED':
       bg = COLOR_STOP;
-      bigText.textContent = 'STOP!\n🪑';
+      bigText.textContent = 'STOP!\n' + (stopWord ? stopWord[0].toUpperCase() + stopWord.slice(1) : '🪑');
       subText.textContent = autoNext()
         ? (mode === 'switch' ? 'Next song in ' : 'Music in ') + countdown + '…'
         : 'Press “Play now” when ready';
@@ -347,6 +401,7 @@ async function startPlaying() {
   }
   clearTimeout(tickTimer);
   clearTimeout(stopTimer);
+  stopSpeaking();
   if (mode === 'switch' && state === 'STOPPED') {
     // After the STOP screen, carry on with a different song
     if (!(await preparePlayer(pickNext())) || state !== 'STOPPED') return;
@@ -444,6 +499,9 @@ function doStop() {
   audio.pause();
   if (mode === 'switch') savePosition();
   beep();
+  stopWord = sayWords ? pickWord() : null;
+  // Say the word once the chime has rung
+  if (stopWord) sayTimer = setTimeout(() => sayWord(stopWord), 900);
   state = 'STOPPED';
   countdown = mode === 'switch' ? switchPause : restTime;
   updateUi();
@@ -484,6 +542,7 @@ function resumeGame() {
 }
 
 function resetGame() {
+  stopSpeaking();
   clearTimeout(stopTimer);
   clearTimeout(tickTimer);
   cancelSwitch();
@@ -511,6 +570,9 @@ function resetToDefaults() {
   });
   stepperRefreshers.forEach((show) => show());
   $('auto').checked = autoRestart;
+  $('say').checked = sayWords;
+  $('words').value = words;
+  showWords();
   showMode();
   updateUi();
   toast('Reset to defaults');
