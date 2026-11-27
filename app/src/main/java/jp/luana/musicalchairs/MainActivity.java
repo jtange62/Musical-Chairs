@@ -56,6 +56,7 @@ public class MainActivity extends Activity {
     private enum State { IDLE, PLAYING, STOPPED, PAUSED }
 
     private static final int PICK_MUSIC = 42;
+    private static final int PICK_SOUNDS = 43;
     private static final int COLOR_IDLE = Color.parseColor("#37474F");
     private static final int COLOR_PLAY = Color.parseColor("#2E7D32");
     private static final int COLOR_STOP = Color.parseColor("#C62828");
@@ -118,6 +119,15 @@ public class MainActivity extends Activity {
     private Button startResume;
     private LinearLayout markRow;
     private Button unmarkButton;
+
+    // Stop sound: a StopSounds key, "file:" + one of mySounds, "random-mine" or "random-all"
+    private String stopSound = "chime";
+    private final List<Uri> mySounds = new ArrayList<>();  // the user's own sound files
+    private String lastSound = null;  // the sound played at the last stop
+    private MediaPlayer sfxPlayer;    // plays the user's own sound files
+    private Button soundButton;
+    private TextView mySoundsText;
+    private Button clearSoundsButton;
 
     // Sound pads
     private static final int PADS = 8;
@@ -222,6 +232,12 @@ public class MainActivity extends Activity {
             highlights = new JSONObject(prefs.getString("highlights", "{}"));
         } catch (JSONException ignored) { }
         padHold = prefs.getBoolean("padHold", false);
+        stopSound = prefs.getString("stopSound", "chime");
+        mySounds.clear();
+        String sounds = prefs.getString("mySounds", "");
+        if (!sounds.isEmpty()) {
+            for (String u : sounds.split("\n")) mySounds.add(Uri.parse(u));
+        }
     }
 
     @Override
@@ -456,6 +472,37 @@ public class MainActivity extends Activity {
             }
         });
         root.addView(auto);
+
+        LinearLayout soundRow = new LinearLayout(this);
+        soundRow.setOrientation(LinearLayout.HORIZONTAL);
+        soundRow.setGravity(Gravity.CENTER_VERTICAL);
+        soundRow.setPadding(0, dp(4), 0, dp(4));
+        TextView soundLabel = text(18, false);
+        soundLabel.setText("Stop sound");
+        soundLabel.setPadding(0, 0, dp(8), 0);
+        soundRow.addView(soundLabel);
+        soundButton = button("", 15);
+        soundButton.setOnClickListener(v -> soundMenu());
+        soundRow.addView(soundButton, new LinearLayout.LayoutParams(0, dp(52), 1));
+        Button trySound = button("🔊 Try it", 15);
+        trySound.setOnClickListener(v -> trySound());
+        soundRow.addView(trySound, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(52)));
+        root.addView(soundRow);
+
+        LinearLayout mySoundsRow = new LinearLayout(this);
+        mySoundsRow.setOrientation(LinearLayout.HORIZONTAL);
+        mySoundsRow.setGravity(Gravity.CENTER_VERTICAL);
+        mySoundsText = text(16, false);
+        mySoundsText.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        mySoundsRow.addView(mySoundsText, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        Button addSounds = button("Add sounds…", 15);
+        addSounds.setOnClickListener(v -> pickSounds());
+        mySoundsRow.addView(addSounds, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(52)));
+        clearSoundsButton = button("Clear", 15);
+        clearSoundsButton.setOnClickListener(v -> clearSounds());
+        mySoundsRow.addView(clearSoundsButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(52)));
+        root.addView(mySoundsRow);
+        showSounds();
 
         startRow = new LinearLayout(this);
         startRow.setOrientation(LinearLayout.VERTICAL);
@@ -713,6 +760,7 @@ public class MainActivity extends Activity {
         handler.removeCallbacks(tickRunnable);
         handler.removeCallbacks(stopRunnable);
         cancelSwitch();
+        hushStopSound();
         // After the STOP screen in "Switch songs", carry on with a different song
         if (switchMode && state == State.STOPPED && !preparePlayer(pickNext())) return;
         if (player == null && !preparePlayer(songIndex)) return;
@@ -803,7 +851,7 @@ public class MainActivity extends Activity {
     private void doStop() {
         if (player != null && player.isPlaying()) player.pause();
         if (switchMode) savePosition();
-        beep();
+        playStopSound();
         state = State.STOPPED;
         countdown = switchMode ? switchPause : restTime;
         updateUi();
@@ -834,6 +882,7 @@ public class MainActivity extends Activity {
     }
 
     private void resetGame() {
+        hushStopSound();
         handler.removeCallbacks(stopRunnable);
         handler.removeCallbacks(tickRunnable);
         cancelSwitch();
@@ -856,6 +905,7 @@ public class MainActivity extends Activity {
         loadSettings();
         for (Runnable refresh : stepperRefreshers) refresh.run();
         autoSwitch.setChecked(autoRestart);
+        showSounds();
         cancelRecording();
         for (int i = 0; i < PADS; i++) deletePad(i);
         editingPads = false;
@@ -1063,13 +1113,125 @@ public class MainActivity extends Activity {
         }
     }
 
-    // Soft two-note chime ("ding-dong")
-    private void beep() {
+    // ---------- Stop sounds ----------
+
+    // What the Stop sound menu shows for a choice
+    private String soundName(String key) {
+        if (key.startsWith("file:")) return "🎵 " + songTitle(Uri.parse(key.substring(5)));
+        if (key.equals("random-mine")) return "🎲 Random: my sounds";
+        if (key.equals("random-all")) return "🎲 Random: all sounds";
+        return StopSounds.name(key);
+    }
+
+    // The menu's choices: the built-in sounds, the user's own, then the random choices
+    private List<String> soundChoices() {
+        List<String> keys = new ArrayList<>();
+        for (String k : StopSounds.KEYS) keys.add(k);
+        for (Uri u : mySounds) keys.add("file:" + u);
+        if (!mySounds.isEmpty()) keys.add("random-mine");
+        keys.add("random-all");
+        return keys;
+    }
+
+    // The chosen sound, or the chime if it is no longer there
+    private String currentSound() {
+        return soundChoices().contains(stopSound) ? stopSound : "chime";
+    }
+
+    private void showSounds() {
+        soundButton.setText(soundName(currentSound()) + "  ▾");
+        mySoundsText.setText(mySounds.isEmpty() ? "My sounds: none" : "My sounds: " + mySounds.size());
+        clearSoundsButton.setVisibility(mySounds.isEmpty() ? View.GONE : View.VISIBLE);
+    }
+
+    private void soundMenu() {
+        List<String> keys = soundChoices();
+        String[] names = new String[keys.size()];
+        for (int i = 0; i < names.length; i++) names[i] = soundName(keys.get(i));
+        new AlertDialog.Builder(this)
+                .setTitle("Stop sound")
+                .setSingleChoiceItems(names, keys.indexOf(currentSound()), (d, which) -> {
+                    stopSound = keys.get(which);
+                    saveSounds();
+                    showSounds();
+                    trySound();
+                })
+                .setPositiveButton("Done", null)
+                .show();
+    }
+
+    private void pickSounds() {
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("audio/*");
+        i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        startActivityForResult(i, PICK_SOUNDS);
+    }
+
+    private void addSounds(List<Uri> picked) {
+        for (Uri u : picked) {
+            try {
+                getContentResolver().takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (SecurityException ignored) { }
+            if (!mySounds.contains(u)) mySounds.add(u);
+        }
+        // Start with the new sound, or with all of them at random if several were added
+        stopSound = picked.size() == 1 ? "file:" + picked.get(0) : "random-mine";
+        saveSounds();
+        showSounds();
+    }
+
+    private void clearSounds() {
+        mySounds.clear();
+        if (stopSound.startsWith("file:") || stopSound.equals("random-mine")) stopSound = "chime";
+        saveSounds();
+        showSounds();
+    }
+
+    private void saveSounds() {
+        StringBuilder sb = new StringBuilder();
+        for (Uri u : mySounds) {
+            if (sb.length() > 0) sb.append("\n");
+            sb.append(u.toString());
+        }
+        prefs.edit().putString("stopSound", stopSound).putString("mySounds", sb.toString()).apply();
+    }
+
+    // The sound for this stop: the chosen one, or a random one (not the same twice in a row)
+    private String pickSound() {
+        String choice = currentSound();
+        List<String> pool = new ArrayList<>();
+        if (choice.equals("random-mine") || choice.equals("random-all")) {
+            if (choice.equals("random-all")) for (String k : StopSounds.KEYS) pool.add(k);
+            for (Uri u : mySounds) pool.add("file:" + u);
+        } else {
+            pool.add(choice);
+        }
+        if (pool.size() > 1) pool.remove(lastSound);
+        return pool.isEmpty() ? "chime" : pool.get(random.nextInt(pool.size()));
+    }
+
+    private void playStopSound() {
+        String key = pickSound();
+        lastSound = key;
+        if (key.startsWith("file:")) {
+            hushStopSound();
+            MediaPlayer mp = null;
+            try { mp = MediaPlayer.create(this, Uri.parse(key.substring(5))); } catch (Exception ignored) { }
+            if (mp == null) {
+                Toast.makeText(this, "Couldn't play that sound. Please add it again.", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            sfxPlayer = mp;
+            mp.setOnCompletionListener(done -> {
+                if (sfxPlayer == done) sfxPlayer = null;
+                done.release();
+            });
+            mp.start();
+            return;
+        }
         try {
-            int rate = 44100;
-            short[] pcm = new short[(int) (rate * 1.3)];
-            addChimeNote(pcm, rate, 784, 0);
-            addChimeNote(pcm, rate, 523, 0.28);
+            short[] pcm = StopSounds.make(key);
             AudioTrack track = new AudioTrack.Builder()
                     .setAudioAttributes(new AudioAttributes.Builder()
                             .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -1077,7 +1239,7 @@ public class MainActivity extends Activity {
                             .build())
                     .setAudioFormat(new AudioFormat.Builder()
                             .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                            .setSampleRate(rate)
+                            .setSampleRate(StopSounds.RATE)
                             .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                             .build())
                     .setBufferSizeInBytes(pcm.length * 2)
@@ -1085,20 +1247,21 @@ public class MainActivity extends Activity {
                     .build();
             track.write(pcm, 0, pcm.length);
             track.play();
-            handler.postDelayed(track::release, 1600);
+            handler.postDelayed(track::release, pcm.length * 1000L / StopSounds.RATE + 300);
         } catch (RuntimeException ignored) { }
     }
 
-    // Adds one bell-like note: fades in quickly, then dies away
-    private static void addChimeNote(short[] pcm, int rate, double hz, double startSec) {
-        int start = (int) (startSec * rate);
-        int len = Math.min(pcm.length - start, rate);
-        for (int i = 0; i < len; i++) {
-            double t = (double) i / rate;
-            double env = Math.min(1, t / 0.02) * Math.exp(-t * 5);
-            double s = pcm[start + i] + Math.sin(2 * Math.PI * hz * t) * env * 0.3 * Short.MAX_VALUE;
-            pcm[start + i] = (short) Math.max(Short.MIN_VALUE, Math.min(Short.MAX_VALUE, s));
+    // Cuts a long sound file short when the music starts again
+    private void hushStopSound() {
+        if (sfxPlayer != null) {
+            sfxPlayer.release();
+            sfxPlayer = null;
         }
+    }
+
+    private void trySound() {
+        hushStopSound();
+        playStopSound();
     }
 
     // ---------- Music ----------
@@ -1156,7 +1319,8 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != PICK_MUSIC || resultCode != RESULT_OK || data == null) return;
+        if (resultCode != RESULT_OK || data == null) return;
+        if (requestCode != PICK_MUSIC && requestCode != PICK_SOUNDS) return;
 
         List<Uri> picked = new ArrayList<>();
         if (data.getClipData() != null) {
@@ -1167,6 +1331,10 @@ public class MainActivity extends Activity {
             picked.add(data.getData());
         }
         if (picked.isEmpty()) return;
+        if (requestCode == PICK_SOUNDS) {
+            addSounds(picked);
+            return;
+        }
 
         StringBuilder sb = new StringBuilder();
         for (Uri u : picked) {
@@ -1221,6 +1389,7 @@ public class MainActivity extends Activity {
         worker.shutdownNow();
         setKeepAlive(false);
         releasePlayer();
+        hushStopSound();
         cancelRecording();
         if (soundPool != null) soundPool.release();
         super.onDestroy();
