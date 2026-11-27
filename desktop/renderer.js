@@ -32,7 +32,7 @@ function loadSetting(key, def) {
     return v === null ? def : JSON.parse(v);
   } catch { return def; }
 }
-let minPlay, maxPlay, restTime, autoRestart, mode, switchPause, startAt, highlights, stopSound, mySounds;
+let minPlay, maxPlay, restTime, autoRestart, mode, switchPause, startAt, highlights, stopSound, mySounds, padMode;
 // Reads the saved settings; anything not saved gets its default
 function loadSettings() {
   minPlay = loadSetting('minPlay', 10);
@@ -48,6 +48,8 @@ function loadSettings() {
   // A key of STOP_SOUNDS, 'file:' + one of mySounds, 'random-mine' or 'random-all'
   stopSound = loadSetting('stopSound', 'chime');
   mySounds = loadSetting('mySounds', []);  // the user's own sound files
+  // Sound pads: 'oneshot' plays all the way through, 'gate' plays only while held
+  padMode = loadSetting('padMode', 'oneshot');
 }
 loadSettings();
 
@@ -149,11 +151,20 @@ function buildUi() {
     if (e.target.tagName === 'BUTTON') e.preventDefault();
   });
   document.addEventListener('keydown', (e) => {
-    if (e.code === 'Space' && !e.repeat && e.target.tagName !== 'INPUT' && e.target.tagName !== 'SELECT') {
+    if (e.repeat || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+    if (e.code === 'Space') {
       e.preventDefault();
       onMainButton();
+    } else if (/^[1-8]$/.test(e.key)) {
+      e.preventDefault();
+      padDown(+e.key - 1);
     }
   });
+  document.addEventListener('keyup', (e) => {
+    if (/^[1-8]$/.test(e.key)) padUp(+e.key - 1);
+  });
+
+  buildPads();
 }
 
 function setMode(m) {
@@ -225,12 +236,17 @@ async function analyzeSong(path) {
   const bytes = await window.desktop.readFile(path);
   const ctx = new OfflineAudioContext(1, 1, Highlights.RATE);
   const buf = await ctx.decodeAudioData(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+  return Highlights.find(toMono(buf), buf.sampleRate).starts;
+}
+
+// All channels of an AudioBuffer mixed into one
+function toMono(buf) {
   const mono = new Float32Array(buf.length);
   for (let c = 0; c < buf.numberOfChannels; c++) {
     const data = buf.getChannelData(c);
     for (let i = 0; i < data.length; i++) mono[i] += data[i] / buf.numberOfChannels;
   }
-  return Highlights.find(mono, buf.sampleRate).starts;
+  return mono;
 }
 
 function showMark() {
@@ -525,9 +541,241 @@ function resetToDefaults() {
   stepperRefreshers.forEach((show) => show());
   $('auto').checked = autoRestart;
   showSounds();
+  cancelRecording();
+  for (let i = 0; i < Pads.COUNT; i++) stopGate(i);
+  pads = [];
+  editingPads = false;
+  window.desktop.padsClear();
+  showPads();
   showMode();
   updateUi();
   toast('Reset to defaults');
+}
+
+// ---------- Sound pads ----------
+
+const PAD_COLORS = ['#E91E63', '#8E24AA', '#3949AB', '#039BE5', '#00897B', '#7CB342', '#FB8C00', '#6D4C41'];
+let pads = [];          // AudioBuffer for each pad, undefined while the pad is empty
+let recording = null;   // the pad being recorded: { pad, starting, stream, recorder, started, saving, cancelled }
+let padMenuOpen = false;
+let editingPads = false;  // "Edit pads" is on: a tap opens the pad's menu instead of playing it
+let gateSounds = [];      // the sound playing on each gate pad while it is held
+let padCtx = null;
+
+function padAudio() {
+  padCtx = padCtx || new AudioContext({ latencyHint: 'interactive' });
+  if (padCtx.state === 'suspended') padCtx.resume();
+  return padCtx;
+}
+
+function buildPads() {
+  const grid = $('pads');
+  for (let i = 0; i < Pads.COUNT; i++) {
+    const b = document.createElement('button');
+    b.className = 'pad';
+    // Sounds play the moment the pad is pressed (and gate pads stop when it's let go)
+    b.addEventListener('pointerdown', (e) => {
+      if (e.button === 0) padDown(i);
+    });
+    for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(ev, () => padUp(i));
+    b.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      padMenu(i);
+    });
+    grid.append(b);
+  }
+  $('editPads').onclick = () => {
+    editingPads = !editingPads;
+    showPads();
+  };
+  $('padOneShot').onclick = () => setPadMode('oneshot');
+  $('padHold').onclick = () => setPadMode('gate');
+  showPads();
+}
+
+function setPadMode(m) {
+  for (let i = 0; i < Pads.COUNT; i++) stopGate(i);
+  padMode = m;
+  localStorage.setItem('padMode', JSON.stringify(padMode));
+  showPads();
+}
+
+function showPads() {
+  $('pads').querySelectorAll('.pad').forEach((b, i) => {
+    const rec = recording && recording.pad === i ? recording : null;
+    b.classList.toggle('rec', !!rec);
+    b.classList.toggle('empty', !rec && !pads[i]);
+    b.style.backgroundColor = !rec && pads[i] ? PAD_COLORS[i] : '';
+    b.textContent = rec
+      ? (rec.starting ? '…' : rec.saving ? 'Saving…' : '● ' + Math.floor((Date.now() - rec.started) / 1000) + 's')
+      : pads[i] ? String(i + 1) : '🎙';
+  });
+  $('padOneShot').classList.toggle('on', padMode !== 'gate');
+  $('padHold').classList.toggle('on', padMode === 'gate');
+  $('pads').classList.toggle('editing', editingPads);
+  $('editPads').textContent = editingPads ? '✓ Done editing' : '✏️ Edit pads';
+  $('padsHint').textContent = editingPads
+    ? 'Tap a pad to record it again or delete it.'
+    : 'Tap 🎙 to record, tap again to stop. '
+      + (padMode === 'gate' ? 'Pads play only while you hold them.' : 'A tap plays the whole sound.')
+      + ' Keys 1–8 play the pads.';
+}
+
+// A pad (or number key) pressed: open its menu while editing, else play / record / stop recording
+function padDown(i) {
+  if (editingPads && pads[i] && !recording) {
+    padMenu(i);
+    return;
+  }
+  if (recording) {
+    if (recording.pad === i) stopRecording();
+    return;
+  }
+  if (pads[i]) playPad(i);
+  else startRecording(i);
+}
+
+// A pad (or number key) let go: gate pads stop
+function padUp(i) {
+  stopGate(i);
+}
+
+function playPad(i) {
+  const ctx = padAudio();
+  const src = ctx.createBufferSource();
+  const gain = ctx.createGain();
+  src.buffer = pads[i];
+  src.connect(gain).connect(ctx.destination);
+  src.start();
+  if (padMode === 'gate') {
+    stopGate(i);
+    const sound = { src, gain };
+    gateSounds[i] = sound;
+    src.onended = () => { if (gateSounds[i] === sound) gateSounds[i] = null; };
+  }
+  const b = $('pads').children[i];
+  b.classList.add('hit');
+  setTimeout(() => b.classList.remove('hit'), 120);
+}
+
+// Stops a gate pad's sound with a very short fade, so it doesn't click
+function stopGate(i) {
+  const sound = gateSounds[i];
+  if (!sound) return;
+  gateSounds[i] = null;
+  const t = padCtx.currentTime;
+  sound.gain.gain.setValueAtTime(sound.gain.gain.value, t);
+  sound.gain.gain.linearRampToValueAtTime(0, t + 0.015);
+  sound.src.stop(t + 0.02);
+}
+
+async function padMenu(i) {
+  if (padMenuOpen || recording || !pads[i]) return;
+  padMenuOpen = true;
+  const choice = await window.desktop.padMenu(i + 1);
+  padMenuOpen = false;
+  if (recording || !pads[i]) return;
+  if (choice === 'record') {
+    startRecording(i);
+  } else if (choice === 'delete') {
+    stopGate(i);
+    pads[i] = undefined;
+    window.desktop.padDelete(i);
+    showPads();
+  }
+}
+
+async function startRecording(i) {
+  const rec = { pad: i, starting: true };
+  recording = rec;
+  showPads();
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      // Raw sound: no echo cancelling (it would cut out the music being recorded)
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+    });
+  } catch (e) {
+    console.error('Microphone', e);
+    if (recording === rec) recording = null;
+    showPads();
+    toast("Couldn't use the microphone. Check that Windows lets apps use it.", 3500);
+    return;
+  }
+  if (rec.cancelled) {
+    stream.getTracks().forEach((t) => t.stop());
+    return;
+  }
+  const chunks = [];
+  rec.stream = stream;
+  rec.recorder = new MediaRecorder(stream);
+  rec.recorder.ondataavailable = (e) => chunks.push(e.data);
+  rec.recorder.onstop = () => finishRecording(rec, chunks);
+  rec.recorder.start();
+  rec.started = Date.now();
+  rec.starting = false;
+  rec.ticker = setInterval(showPads, 250);
+  rec.limit = setTimeout(stopRecording, Pads.MAX_SECONDS * 1000);
+  showPads();
+}
+
+function stopRecording() {
+  const rec = recording;
+  if (!rec || !rec.recorder || rec.saving) return;
+  rec.saving = true;
+  clearInterval(rec.ticker);
+  clearTimeout(rec.limit);
+  rec.recorder.stop();
+  showPads();
+}
+
+async function finishRecording(rec, chunks) {
+  rec.stream.getTracks().forEach((t) => t.stop());
+  if (rec.cancelled) return;
+  try {
+    const ctx = padAudio();
+    const decoded = await ctx.decodeAudioData(await new Blob(chunks).arrayBuffer());
+    const sound = Pads.tidy(toMono(decoded), decoded.sampleRate);
+    if (rec.cancelled) return;
+    if (!sound) {
+      toast("Didn't hear anything. Try again a bit closer to the microphone.", 3000);
+    } else {
+      const buf = ctx.createBuffer(1, sound.length, decoded.sampleRate);
+      buf.copyToChannel(sound, 0);
+      pads[rec.pad] = buf;
+      await window.desktop.padSave(rec.pad, Pads.wav(sound, decoded.sampleRate));
+      if (rec.cancelled) window.desktop.padDelete(rec.pad);  // reset while saving
+    }
+  } catch (e) {
+    console.error('Recording', e);
+    toast("Couldn't save that sound. Please try again.", 3000);
+  }
+  if (recording === rec) recording = null;
+  showPads();
+}
+
+// Throws away a recording in progress (on reset)
+function cancelRecording() {
+  const rec = recording;
+  if (!rec) return;
+  rec.cancelled = true;
+  clearInterval(rec.ticker);
+  clearTimeout(rec.limit);
+  if (rec.recorder && rec.recorder.state !== 'inactive') rec.recorder.stop();
+  recording = null;
+}
+
+async function loadPads() {
+  for (let i = 0; i < Pads.COUNT; i++) {
+    const bytes = await window.desktop.padLoad(i);
+    if (!bytes) continue;
+    try {
+      pads[i] = await padAudio().decodeAudioData(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+    } catch (e) {
+      console.error('Could not load pad', i + 1, e);
+    }
+  }
+  showPads();
 }
 
 // ---------- Stop sounds ----------
@@ -775,4 +1023,5 @@ buildUi();
 updateUi();
 if (songs.length > 0) preparePlayer(0).then(updateUi);
 if (mode === 'switch' && startAt === 'catchy') findCatchyParts();
+loadPads();
 setInterval(updateProgress, 500);

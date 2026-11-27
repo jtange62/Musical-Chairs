@@ -78,6 +78,18 @@
   #mySoundsRow { display: flex; align-items: center; gap: 8px; padding: 0 0 8px; font-size: 16px; }
   #mySoundsRow .name { flex: 1; }
   #mySoundsRow button { height: 40px; padding: 0 14px; font-size: 15px; }
+  #pads { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  #padModeRow button { height: 40px; font-size: 15px; }
+  .pad { height: 64px; font-size: 24px; font-weight: bold; color: #fff; touch-action: none; user-select: none; transition: filter 0.1s, transform 0.1s; }
+  .pad.empty { background: rgba(255, 255, 255, 0.18); }
+  .pad.empty:hover { background: rgba(255, 255, 255, 0.3); }
+  .pad.rec { background: #D50000; font-size: 18px; animation: pulse 1s infinite; }
+  .pad.hit { filter: brightness(1.5); transform: scale(0.95); }
+  @keyframes pulse { 50% { opacity: 0.7; } }
+  #pads.editing .pad { outline: 3px dashed rgba(255, 255, 255, 0.85); outline-offset: -6px; }
+  #editRow button { height: 40px; font-size: 15px; background: rgba(255, 255, 255, 0.3); color: #fff; }
+  #editRow button:hover { background: rgba(255, 255, 255, 0.45); }
+  #padsHint { font-size: 13px; opacity: 0.8; padding-top: 6px; }
   #toast {
     position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
     background: rgba(0, 0, 0, 0.8); padding: 10px 18px; border-radius: 20px;
@@ -102,6 +114,14 @@
     <button id="reset">Reset</button>
     <button id="pick">Choose music</button>
   </div>
+  <h2>Sound pads</h2>
+  <div class="modes" id="padModeRow">
+    <button id="padOneShot">▶ One-shot</button>
+    <button id="padHold">✋ Hold</button>
+  </div>
+  <div id="pads"></div>
+  <div class="row" id="editRow"><button id="editPads">✏️ Edit pads</button></div>
+  <div id="padsHint" class="center"></div>
   <h2>Settings</h2>
   <div class="modes">
     <button id="modeChairs">Musical chairs</button>
@@ -130,6 +150,7 @@
 </div>
 <div id="toast"></div>
 <script src="highlights.js"></script>
+<script src="pads.js"></script>
 <script src="renderer.js"></script>
 </body>
 </html>
