@@ -32,7 +32,7 @@ function loadSetting(key, def) {
     return v === null ? def : JSON.parse(v);
   } catch { return def; }
 }
-let minPlay, maxPlay, restTime, autoRestart, mode, switchPause, startAt, highlights, sayWords, words, voiceName, stopSound, mySounds;
+let minPlay, maxPlay, restTime, autoRestart, mode, switchPause, startAt, highlights, stopSound, mySounds;
 // Reads the saved settings; anything not saved gets its default
 function loadSettings() {
   minPlay = loadSetting('minPlay', 10);
@@ -45,10 +45,6 @@ function loadSettings() {
   startAt = loadSetting('startAt', 'catchy');
   // Per song file: { starts: [seconds of the catchy part], mark: seconds chosen by hand }
   highlights = loadSetting('highlights', {});
-  // At each stop, a voice says a random word from the list
-  sayWords = loadSetting('sayWords', true);
-  words = loadSetting('words', 'happy, sad, angry, scared, surprised, silly, sleepy');
-  voiceName = loadSetting('voiceName', null);  // null = an English voice picked automatically
   // A key of STOP_SOUNDS, 'file:' + one of mySounds, 'random-mine' or 'random-all'
   stopSound = loadSetting('stopSound', 'chime');
   mySounds = loadSetting('mySounds', []);  // the user's own sound files
@@ -63,9 +59,6 @@ function saveSettings() {
   localStorage.setItem('maxPlay', JSON.stringify(maxPlay));
   localStorage.setItem('restTime', JSON.stringify(restTime));
   localStorage.setItem('autoRestart', JSON.stringify(autoRestart));
-  localStorage.setItem('sayWords', JSON.stringify(sayWords));
-  localStorage.setItem('words', JSON.stringify(words));
-  localStorage.setItem('voiceName', JSON.stringify(voiceName));
   localStorage.setItem('stopSound', JSON.stringify(stopSound));
   localStorage.setItem('mySounds', JSON.stringify(mySounds));
 }
@@ -124,23 +117,11 @@ function buildUi() {
     }
   };
 
-  const say = $('say');
-  say.checked = sayWords;
-  say.onchange = () => { sayWords = say.checked; saveSettings(); showWords(); };
-  $('words').value = words;
-  $('words').oninput = () => { words = $('words').value; saveSettings(); };
-  $('voice').onchange = () => { voiceName = $('voice').value || null; saveSettings(); tryVoice(); };
-  $('tryVoice').onclick = tryVoice;
-
   showSounds();
   $('sound').onchange = () => { stopSound = $('sound').value; saveSettings(); trySound(); };
   $('trySound').onclick = trySound;
   $('addSounds').onclick = addSounds;
   $('clearSounds').onclick = clearSounds;
-  // Windows lists its voices a moment after the app opens
-  speechSynthesis.onvoiceschanged = showVoices;
-  showVoices();
-  showWords();
 
   $('startCatchy').onclick = () => setStartAt('catchy');
   $('startRandom').onclick = () => setStartAt('random');
@@ -278,70 +259,6 @@ function unmarkSpot() {
   updateUi();
 }
 
-// ---------- Word at the stop ----------
-
-let stopWord = null;   // the word said at this stop
-let soundId = 0;      // changes when the stop sound and word are cut short
-
-function showWords() {
-  $('wordsRow').hidden = !sayWords;
-}
-
-function wordList() {
-  return words.split(',').map((w) => w.trim()).filter((w) => w);
-}
-
-// A random word from the list, not the same one twice in a row
-function pickWord() {
-  const list = wordList();
-  if (list.length === 0) return null;
-  const others = list.length > 1 ? list.filter((w) => w !== stopWord) : list;
-  return others[Math.floor(Math.random() * others.length)];
-}
-
-// The chosen voice, or else an English one, even if Windows is set to another language
-function chosenVoice() {
-  const all = speechSynthesis.getVoices();
-  const chosen = all.find((v) => v.name === voiceName);
-  if (chosen) return chosen;
-  const voices = all.filter((v) => v.lang.startsWith('en'));
-  return voices.find((v) => v.default) || voices.find((v) => /zira/i.test(v.name)) || voices[0] || null;
-}
-
-// Fills the Voice menu: English voices first, then the others
-function showVoices() {
-  const menu = $('voice');
-  const voices = speechSynthesis.getVoices().slice()
-    .sort((a, b) => b.lang.startsWith('en') - a.lang.startsWith('en'));
-  menu.replaceChildren(new Option('Automatic (English)', ''));
-  for (const v of voices) {
-    // "Microsoft Zira - English (United States)" -> "Zira - English (United States)"
-    menu.add(new Option(v.name.replace(/^Microsoft /, ''), v.name));
-  }
-  menu.value = voices.some((v) => v.name === voiceName) ? voiceName : '';
-}
-
-function tryVoice() {
-  stopSpeaking();
-  sayWord(pickWord() || 'happy');
-}
-
-function sayWord(word) {
-  try {
-    const u = new SpeechSynthesisUtterance(word);
-    u.voice = chosenVoice();
-    if (u.voice) u.lang = u.voice.lang;
-    u.rate = 0.85;  // a little slow, for young children
-    speechSynthesis.speak(u);
-  } catch { /* no voice available */ }
-}
-
-function stopSpeaking() {
-  soundId++;
-  sfx.pause();
-  try { speechSynthesis.cancel(); } catch { /* no voice available */ }
-}
-
 // Whether the STOP countdown runs by itself ("Switch songs" always moves on)
 function autoNext() {
   return mode === 'switch' || autoRestart;
@@ -366,7 +283,7 @@ function updateUi() {
       break;
     case 'STOPPED':
       bg = COLOR_STOP;
-      bigText.textContent = 'STOP!\n' + (stopWord ? stopWord[0].toUpperCase() + stopWord.slice(1) : '🪑');
+      bigText.textContent = 'STOP!\n🪑';
       subText.textContent = autoNext()
         ? (mode === 'switch' ? 'Next song in ' : 'Music in ') + countdown + '…'
         : 'Press “Play now” when ready';
@@ -441,7 +358,7 @@ async function startPlaying() {
   }
   clearTimeout(tickTimer);
   clearTimeout(stopTimer);
-  stopSpeaking();
+  hushStopSound();
   if (mode === 'switch' && state === 'STOPPED') {
     // After the STOP screen, carry on with a different song
     if (!(await preparePlayer(pickNext())) || state !== 'STOPPED') return;
@@ -538,12 +455,7 @@ async function switchSong() {
 function doStop() {
   audio.pause();
   if (mode === 'switch') savePosition();
-  const id = ++soundId;
-  stopWord = sayWords ? pickWord() : null;
-  // Say the word once the stop sound has played
-  playStopSound().then(() => {
-    if (stopWord && id === soundId) sayWord(stopWord);
-  });
+  playStopSound();
   state = 'STOPPED';
   countdown = mode === 'switch' ? switchPause : restTime;
   updateUi();
@@ -584,7 +496,7 @@ function resumeGame() {
 }
 
 function resetGame() {
-  stopSpeaking();
+  hushStopSound();
   clearTimeout(stopTimer);
   clearTimeout(tickTimer);
   cancelSwitch();
@@ -612,11 +524,7 @@ function resetToDefaults() {
   });
   stepperRefreshers.forEach((show) => show());
   $('auto').checked = autoRestart;
-  $('say').checked = sayWords;
-  $('words').value = words;
   showSounds();
-  showVoices();
-  showWords();
   showMode();
   updateUi();
   toast('Reset to defaults');
@@ -658,7 +566,6 @@ function rattle(at, vol) {
   src.start(soundCtx.currentTime + at);
 }
 
-// Each sound plays itself and returns how long it lasts in seconds, so the word waits for it
 const STOP_SOUNDS = {
   chime: {
     name: 'Chime',
@@ -666,7 +573,6 @@ const STOP_SOUNDS = {
       // Soft two-note "ding-dong"
       note(784, 0, { decay: 0.6 });
       note(523, 0.28, { decay: 0.6 });
-      return 0.9;
     },
   },
   sleigh: {
@@ -679,7 +585,6 @@ const STOP_SOUNDS = {
           note(3000 + Math.random() * 4000, at + Math.random() * 0.05, { vol: 0.06, decay: 0.25, type: 'triangle', len: 0.4 });
         }
       }
-      return 1.3;
     },
   },
   bell: {
@@ -689,7 +594,6 @@ const STOP_SOUNDS = {
       for (const [ratio, vol, decay] of [[0.5, 0.11, 3], [1, 0.14, 2.2], [1.19, 0.07, 1.6], [1.5, 0.05, 1.3], [2, 0.07, 1.1], [2.74, 0.03, 0.8], [3.76, 0.02, 0.6]]) {
         note(196 * ratio, 0, { vol, decay, len: 3.5 });
       }
-      return 1.4;
     },
   },
   jingle: {
@@ -704,7 +608,6 @@ const STOP_SOUNDS = {
         note(hz * 2, at, { vol: 0.04, decay: 0.2 });
         at += beats * beat;
       }
-      return at - 3 * beat;
     },
   },
   sparkle: {
@@ -714,7 +617,6 @@ const STOP_SOUNDS = {
       for (let k = 0; k < 14; k++) {
         note(1500 + k * 180 + Math.random() * 300, k * 0.05, { vol: 0.1, decay: 0.4, len: 0.6 });
       }
-      return 1.1;
     },
   },
 };
@@ -764,37 +666,27 @@ function pickSound() {
   return others[Math.floor(Math.random() * others.length)] || 'chime';
 }
 
-function playFile(path) {
-  return new Promise(async (resolve) => {
-    const done = () => {
-      clearTimeout(limit);
-      // Leave the handlers alone if a newer sound has taken over the player
-      if (sfx.onended === done) sfx.onended = sfx.onerror = null;
-      resolve();
-    };
-    // A long sound file doesn't hold up the word for more than 10 seconds
-    const limit = setTimeout(done, 10000);
-    sfx.onended = sfx.onerror = done;
-    sfx.src = await window.desktop.fileUrl(path);
-    sfx.play().catch(done);
-  });
-}
-
-// Plays the stop sound; resolves once it has finished, so the word can be said after it
-function playStopSound() {
+async function playStopSound() {
   const key = pickSound();
   lastSound = key;
-  if (key.startsWith('file:')) return playFile(key.slice(5));
-  let seconds = 0;
+  if (key.startsWith('file:')) {
+    sfx.src = await window.desktop.fileUrl(key.slice(5));
+    sfx.play().catch(() => {});
+    return;
+  }
   try {
     soundCtx = soundCtx || new AudioContext();
-    seconds = STOP_SOUNDS[key].play();
+    STOP_SOUNDS[key].play();
   } catch { /* no sound device */ }
-  return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+}
+
+// Cuts a long sound file short when the music starts again
+function hushStopSound() {
+  sfx.pause();
 }
 
 function trySound() {
-  stopSpeaking();
+  hushStopSound();
   playStopSound();
 }
 

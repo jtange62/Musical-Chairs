@@ -69,17 +69,12 @@
   #markRow #mark { flex: 3; }
   label.switch { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; font-size: 18px; cursor: pointer; }
   label.switch input { width: 22px; height: 22px; accent-color: #fff; }
-  #words {
-    width: 100%; font: inherit; font-size: 17px; padding: 8px 10px;
-    border: none; border-radius: 6px; background: rgba(255, 255, 255, 0.92); color: #222;
-  }
-  #wordsHint { font-size: 14px; opacity: 0.8; padding: 4px 0 8px; }
-  #voiceRow, #soundRow { display: flex; align-items: center; gap: 8px; padding: 4px 0 8px; font-size: 18px; }
-  #voice, #sound {
+  #soundRow { display: flex; align-items: center; gap: 8px; padding: 4px 0 8px; font-size: 18px; }
+  #sound {
     flex: 1; min-width: 0; height: 44px; font: inherit; font-size: 16px; padding: 0 6px;
     border: none; border-radius: 6px; background: rgba(255, 255, 255, 0.92); color: #222;
   }
-  #tryVoice, #trySound { height: 44px; padding: 0 14px; font-size: 15px; }
+  #trySound { height: 44px; padding: 0 14px; font-size: 15px; }
   #mySoundsRow { display: flex; align-items: center; gap: 8px; padding: 0 0 8px; font-size: 16px; }
   #mySoundsRow .name { flex: 1; }
   #mySoundsRow button { height: 40px; padding: 0 14px; font-size: 15px; }
@@ -123,16 +118,6 @@
     <span class="name" id="mySoundsName"></span>
     <button id="addSounds">Add sounds…</button>
     <button id="clearSounds">Clear</button>
-  </div>
-  <label class="switch">Say a word at the stop <input id="say" type="checkbox"></label>
-  <div id="wordsRow">
-    <input id="words" type="text" spellcheck="false">
-    <div id="wordsHint">Words to pick from, separated by commas</div>
-    <div id="voiceRow">
-      Voice
-      <select id="voice"></select>
-      <button id="tryVoice">🔊 Try it</button>
-    </div>
   </div>
   <div id="startRow">
     <div class="label">Songs start at</div>
