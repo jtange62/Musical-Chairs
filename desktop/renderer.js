@@ -32,7 +32,7 @@ function loadSetting(key, def) {
     return v === null ? def : JSON.parse(v);
   } catch { return def; }
 }
-let minPlay, maxPlay, restTime, autoRestart, mode, switchPause, startAt, highlights, sayWords, words, voiceName;
+let minPlay, maxPlay, restTime, autoRestart, mode, switchPause, startAt, highlights, sayWords, words, voiceName, stopSound;
 // Reads the saved settings; anything not saved gets its default
 function loadSettings() {
   minPlay = loadSetting('minPlay', 10);
@@ -49,6 +49,7 @@ function loadSettings() {
   sayWords = loadSetting('sayWords', true);
   words = loadSetting('words', 'happy, sad, angry, scared, surprised, silly, sleepy');
   voiceName = loadSetting('voiceName', null);  // null = an English voice picked automatically
+  stopSound = loadSetting('stopSound', 'chime');  // one of STOP_SOUNDS
 }
 loadSettings();
 
@@ -63,6 +64,7 @@ function saveSettings() {
   localStorage.setItem('sayWords', JSON.stringify(sayWords));
   localStorage.setItem('words', JSON.stringify(words));
   localStorage.setItem('voiceName', JSON.stringify(voiceName));
+  localStorage.setItem('stopSound', JSON.stringify(stopSound));
 }
 
 // ---------- UI ----------
@@ -126,6 +128,11 @@ function buildUi() {
   $('words').oninput = () => { words = $('words').value; saveSettings(); };
   $('voice').onchange = () => { voiceName = $('voice').value || null; saveSettings(); tryVoice(); };
   $('tryVoice').onclick = tryVoice;
+
+  for (const [key, s] of Object.entries(STOP_SOUNDS)) $('sound').add(new Option(s.name, key));
+  $('sound').value = stopSound;
+  $('sound').onchange = () => { stopSound = $('sound').value; saveSettings(); trySound(); };
+  $('trySound').onclick = trySound;
   // Windows lists its voices a moment after the app opens
   speechSynthesis.onvoiceschanged = showVoices;
   showVoices();
@@ -526,10 +533,10 @@ async function switchSong() {
 function doStop() {
   audio.pause();
   if (mode === 'switch') savePosition();
-  beep();
+  const soundLength = playStopSound();
   stopWord = sayWords ? pickWord() : null;
-  // Say the word once the chime has rung
-  if (stopWord) sayTimer = setTimeout(() => sayWord(stopWord), 900);
+  // Say the word once the stop sound has played
+  if (stopWord) sayTimer = setTimeout(() => sayWord(stopWord), soundLength * 1000);
   state = 'STOPPED';
   countdown = mode === 'switch' ? switchPause : restTime;
   updateUi();
@@ -600,6 +607,7 @@ function resetToDefaults() {
   $('auto').checked = autoRestart;
   $('say').checked = sayWords;
   $('words').value = words;
+  $('sound').value = stopSound;
   showVoices();
   showWords();
   showMode();
@@ -607,25 +615,131 @@ function resetToDefaults() {
   toast('Reset to defaults');
 }
 
-let beepCtx = null;
-function beep() {
+// ---------- Stop sounds ----------
+
+let soundCtx = null;
+
+// One bell-like note: fades in quickly, then dies away over `decay` seconds
+function note(hz, at, { vol = 0.3, decay = 0.2, type = 'sine', len = 1 } = {}) {
+  const t = soundCtx.currentTime + at;
+  const osc = soundCtx.createOscillator();
+  const gain = soundCtx.createGain();
+  osc.type = type;
+  osc.frequency.value = hz;
+  gain.gain.setValueAtTime(0, t);
+  gain.gain.linearRampToValueAtTime(vol, t + 0.01);
+  gain.gain.setTargetAtTime(0, t + 0.01, decay / 3);
+  osc.connect(gain).connect(soundCtx.destination);
+  osc.start(t);
+  osc.stop(t + len);
+}
+
+// A short burst of high hiss, like bells rattling
+function rattle(at, vol) {
+  const len = 0.12;
+  const buf = soundCtx.createBuffer(1, Math.floor(soundCtx.sampleRate * len), soundCtx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 3);
+  const src = soundCtx.createBufferSource();
+  src.buffer = buf;
+  const filter = soundCtx.createBiquadFilter();
+  filter.type = 'highpass';
+  filter.frequency.value = 6000;
+  const gain = soundCtx.createGain();
+  gain.gain.value = vol;
+  src.connect(filter).connect(gain).connect(soundCtx.destination);
+  src.start(soundCtx.currentTime + at);
+}
+
+// Each sound plays itself and returns how long it lasts in seconds, so the word waits for it
+const STOP_SOUNDS = {
+  chime: {
+    name: 'Chime',
+    play() {
+      // Soft two-note "ding-dong"
+      note(784, 0, { decay: 0.6 });
+      note(523, 0.28, { decay: 0.6 });
+      return 0.9;
+    },
+  },
+  sleigh: {
+    name: '🛷 Sleigh bells',
+    play() {
+      // A few shakes, each a cluster of tiny bells
+      for (const at of [0, 0.3, 0.6, 0.75, 0.9]) {
+        rattle(at, 0.25);
+        for (let k = 0; k < 6; k++) {
+          note(3000 + Math.random() * 4000, at + Math.random() * 0.05, { vol: 0.06, decay: 0.25, type: 'triangle', len: 0.4 });
+        }
+      }
+      return 1.3;
+    },
+  },
+  bell: {
+    name: '🔔 Big bell',
+    play() {
+      // A church bell's mix of tones; the low ones ring longest
+      for (const [ratio, vol, decay] of [[0.5, 0.11, 3], [1, 0.14, 2.2], [1.19, 0.07, 1.6], [1.5, 0.05, 1.3], [2, 0.07, 1.1], [2.74, 0.03, 0.8], [3.76, 0.02, 0.6]]) {
+        note(196 * ratio, 0, { vol, decay, len: 3.5 });
+      }
+      return 1.4;
+    },
+  },
+  jingle: {
+    name: '🎶 Jingle Bells tune',
+    play() {
+      // "Jingle bells, jingle bells, jingle all the way" on bells
+      const E = 1318.5, G = 1568, C = 1046.5, D = 1174.7;
+      const beat = 0.2;
+      let at = 0;
+      for (const [hz, beats] of [[E, 1], [E, 1], [E, 2], [E, 1], [E, 1], [E, 2], [E, 1], [G, 1], [C, 1.5], [D, 0.5], [E, 4]]) {
+        note(hz, at, { vol: 0.22, decay: 0.5 });
+        note(hz * 2, at, { vol: 0.04, decay: 0.2 });
+        at += beats * beat;
+      }
+      return at - 3 * beat;
+    },
+  },
+  sparkle: {
+    name: '✨ Magic sparkle',
+    play() {
+      // Quick rising twinkles
+      for (let k = 0; k < 14; k++) {
+        note(1500 + k * 180 + Math.random() * 300, k * 0.05, { vol: 0.1, decay: 0.4, len: 0.6 });
+      }
+      return 1.1;
+    },
+  },
+  hohoho: {
+    name: '🎅 Ho ho ho!',
+    play() {
+      // Spoken in a deep English voice; the word is spoken after it, in turn
+      try {
+        const u = new SpeechSynthesisUtterance('Ho, ho, ho!');
+        const english = speechSynthesis.getVoices().filter((v) => v.lang.startsWith('en'));
+        u.voice = english.find((v) => /david|mark/i.test(v.name)) || english[0] || null;
+        u.lang = 'en-US';
+        u.pitch = 0.1;
+        u.rate = 0.8;
+        speechSynthesis.speak(u);
+      } catch { /* no voice available */ }
+      return 0;
+    },
+  },
+};
+
+function playStopSound() {
   try {
-    beepCtx = beepCtx || new AudioContext();
-    const t = beepCtx.currentTime;
-    // Soft two-note chime ("ding-dong"): each note fades in quickly and dies away like a bell
-    for (const [hz, at] of [[784, 0], [523, 0.28]]) {
-      const osc = beepCtx.createOscillator();
-      const gain = beepCtx.createGain();
-      osc.type = 'sine';
-      osc.frequency.value = hz;
-      gain.gain.setValueAtTime(0, t + at);
-      gain.gain.linearRampToValueAtTime(0.3, t + at + 0.02);
-      gain.gain.setTargetAtTime(0, t + at + 0.02, 0.2);
-      osc.connect(gain).connect(beepCtx.destination);
-      osc.start(t + at);
-      osc.stop(t + at + 1);
-    }
-  } catch { /* no sound device */ }
+    soundCtx = soundCtx || new AudioContext();
+    return (STOP_SOUNDS[stopSound] || STOP_SOUNDS.chime).play();
+  } catch {
+    return 0;  // no sound device
+  }
+}
+
+function trySound() {
+  stopSpeaking();
+  playStopSound();
 }
 
 // ---------- Music ----------

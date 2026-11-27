@@ -74,12 +74,12 @@
     border: none; border-radius: 6px; background: rgba(255, 255, 255, 0.92); color: #222;
   }
   #wordsHint { font-size: 14px; opacity: 0.8; padding: 4px 0 8px; }
-  #voiceRow { display: flex; align-items: center; gap: 8px; padding: 4px 0 8px; font-size: 18px; }
-  #voice {
+  #voiceRow, #soundRow { display: flex; align-items: center; gap: 8px; padding: 4px 0 8px; font-size: 18px; }
+  #voice, #sound {
     flex: 1; min-width: 0; height: 44px; font: inherit; font-size: 16px; padding: 0 6px;
     border: none; border-radius: 6px; background: rgba(255, 255, 255, 0.92); color: #222;
   }
-  #tryVoice { height: 44px; padding: 0 14px; font-size: 15px; }
+  #tryVoice, #trySound { height: 44px; padding: 0 14px; font-size: 15px; }
   #toast {
     position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
     background: rgba(0, 0, 0, 0.8); padding: 10px 18px; border-radius: 20px;
@@ -111,6 +111,11 @@
   </div>
   <div id="steppers"></div>
   <label class="switch" id="autoRow">Restart music automatically <input id="auto" type="checkbox"></label>
+  <div id="soundRow">
+    Stop sound
+    <select id="sound"></select>
+    <button id="trySound">🔊 Try it</button>
+  </div>
   <label class="switch">Say a word at the stop <input id="say" type="checkbox"></label>
   <div id="wordsRow">
     <input id="words" type="text" spellcheck="false">
