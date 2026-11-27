@@ -39,6 +39,18 @@ ipcMain.handle('choose-music', async () => {
   return result.canceled ? [] : result.filePaths;
 });
 
+ipcMain.handle('choose-sounds', async () => {
+  const result = await dialog.showOpenDialog(win, {
+    title: 'Add stop sounds',
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: 'Audio', extensions: ['mp3', 'm4a', 'aac', 'wav', 'ogg', 'oga', 'opus', 'flac', 'webm'] },
+      { name: 'All files', extensions: ['*'] },
+    ],
+  });
+  return result.canceled ? [] : result.filePaths;
+});
+
 ipcMain.handle('confirm-reset', async () => {
   const result = await dialog.showMessageBox(win, {
     type: 'warning',

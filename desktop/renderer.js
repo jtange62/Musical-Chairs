@@ -32,7 +32,7 @@ function loadSetting(key, def) {
     return v === null ? def : JSON.parse(v);
   } catch { return def; }
 }
-let minPlay, maxPlay, restTime, autoRestart, mode, switchPause, startAt, highlights, sayWords, words, voiceName, stopSound;
+let minPlay, maxPlay, restTime, autoRestart, mode, switchPause, startAt, highlights, sayWords, words, voiceName, stopSound, mySounds;
 // Reads the saved settings; anything not saved gets its default
 function loadSettings() {
   minPlay = loadSetting('minPlay', 10);
@@ -49,7 +49,9 @@ function loadSettings() {
   sayWords = loadSetting('sayWords', true);
   words = loadSetting('words', 'happy, sad, angry, scared, surprised, silly, sleepy');
   voiceName = loadSetting('voiceName', null);  // null = an English voice picked automatically
-  stopSound = loadSetting('stopSound', 'chime');  // one of STOP_SOUNDS
+  // A key of STOP_SOUNDS, 'file:' + one of mySounds, 'random-mine' or 'random-all'
+  stopSound = loadSetting('stopSound', 'chime');
+  mySounds = loadSetting('mySounds', []);  // the user's own sound files
 }
 loadSettings();
 
@@ -65,6 +67,7 @@ function saveSettings() {
   localStorage.setItem('words', JSON.stringify(words));
   localStorage.setItem('voiceName', JSON.stringify(voiceName));
   localStorage.setItem('stopSound', JSON.stringify(stopSound));
+  localStorage.setItem('mySounds', JSON.stringify(mySounds));
 }
 
 // ---------- UI ----------
@@ -129,10 +132,11 @@ function buildUi() {
   $('voice').onchange = () => { voiceName = $('voice').value || null; saveSettings(); tryVoice(); };
   $('tryVoice').onclick = tryVoice;
 
-  for (const [key, s] of Object.entries(STOP_SOUNDS)) $('sound').add(new Option(s.name, key));
-  $('sound').value = stopSound;
+  showSounds();
   $('sound').onchange = () => { stopSound = $('sound').value; saveSettings(); trySound(); };
   $('trySound').onclick = trySound;
+  $('addSounds').onclick = addSounds;
+  $('clearSounds').onclick = clearSounds;
   // Windows lists its voices a moment after the app opens
   speechSynthesis.onvoiceschanged = showVoices;
   showVoices();
@@ -277,7 +281,7 @@ function unmarkSpot() {
 // ---------- Word at the stop ----------
 
 let stopWord = null;   // the word said at this stop
-let sayTimer = null;
+let soundId = 0;      // changes when the stop sound and word are cut short
 
 function showWords() {
   $('wordsRow').hidden = !sayWords;
@@ -333,7 +337,8 @@ function sayWord(word) {
 }
 
 function stopSpeaking() {
-  clearTimeout(sayTimer);
+  soundId++;
+  sfx.pause();
   try { speechSynthesis.cancel(); } catch { /* no voice available */ }
 }
 
@@ -533,10 +538,12 @@ async function switchSong() {
 function doStop() {
   audio.pause();
   if (mode === 'switch') savePosition();
-  const soundLength = playStopSound();
+  const id = ++soundId;
   stopWord = sayWords ? pickWord() : null;
   // Say the word once the stop sound has played
-  if (stopWord) sayTimer = setTimeout(() => sayWord(stopWord), soundLength * 1000);
+  playStopSound().then(() => {
+    if (stopWord && id === soundId) sayWord(stopWord);
+  });
   state = 'STOPPED';
   countdown = mode === 'switch' ? switchPause : restTime;
   updateUi();
@@ -607,7 +614,7 @@ function resetToDefaults() {
   $('auto').checked = autoRestart;
   $('say').checked = sayWords;
   $('words').value = words;
-  $('sound').value = stopSound;
+  showSounds();
   showVoices();
   showWords();
   showMode();
@@ -710,31 +717,80 @@ const STOP_SOUNDS = {
       return 1.1;
     },
   },
-  hohoho: {
-    name: '🎅 Ho ho ho!',
-    play() {
-      // Spoken in a deep English voice; the word is spoken after it, in turn
-      try {
-        const u = new SpeechSynthesisUtterance('Ho, ho, ho!');
-        const english = speechSynthesis.getVoices().filter((v) => v.lang.startsWith('en'));
-        u.voice = english.find((v) => /david|mark/i.test(v.name)) || english[0] || null;
-        u.lang = 'en-US';
-        u.pitch = 0.1;
-        u.rate = 0.8;
-        speechSynthesis.speak(u);
-      } catch { /* no voice available */ }
-      return 0;
-    },
-  },
 };
 
+const sfx = new Audio();  // plays the user's own sound files
+let lastSound = null;     // the sound played at the last stop
+
+// Fills the Stop sound menu: the built-in sounds, the user's own, then the random choices
+function showSounds() {
+  const menu = $('sound');
+  menu.replaceChildren();
+  for (const [key, s] of Object.entries(STOP_SOUNDS)) menu.add(new Option(s.name, key));
+  for (const p of mySounds) menu.add(new Option('🎵 ' + songTitle(p), 'file:' + p));
+  if (mySounds.length) menu.add(new Option('🎲 Random: my sounds', 'random-mine'));
+  menu.add(new Option('🎲 Random: all sounds', 'random-all'));
+  // A sound that is no longer there falls back to the chime
+  menu.value = [...menu.options].some((o) => o.value === stopSound) ? stopSound : 'chime';
+  $('mySoundsName').textContent = mySounds.length === 0 ? 'My sounds: none'
+    : 'My sounds: ' + mySounds.length;
+  $('clearSounds').hidden = mySounds.length === 0;
+}
+
+async function addSounds() {
+  const picked = await window.desktop.chooseSounds();
+  if (picked.length === 0) return;
+  mySounds = [...new Set([...mySounds, ...picked])];
+  // Start with the new sound, or with all of them at random if several were added
+  stopSound = picked.length === 1 ? 'file:' + picked[0] : 'random-mine';
+  saveSettings();
+  showSounds();
+}
+
+function clearSounds() {
+  mySounds = [];
+  if (stopSound.startsWith('file:') || stopSound === 'random-mine') stopSound = 'chime';
+  saveSettings();
+  showSounds();
+}
+
+// The sound for this stop: the chosen one, or a random one (not the same twice in a row)
+function pickSound() {
+  const mine = mySounds.map((p) => 'file:' + p);
+  const choice = $('sound').value;
+  const pool = choice === 'random-mine' ? mine
+    : choice === 'random-all' ? [...Object.keys(STOP_SOUNDS), ...mine] : [choice];
+  const others = pool.length > 1 ? pool.filter((k) => k !== lastSound) : pool;
+  return others[Math.floor(Math.random() * others.length)] || 'chime';
+}
+
+function playFile(path) {
+  return new Promise(async (resolve) => {
+    const done = () => {
+      clearTimeout(limit);
+      // Leave the handlers alone if a newer sound has taken over the player
+      if (sfx.onended === done) sfx.onended = sfx.onerror = null;
+      resolve();
+    };
+    // A long sound file doesn't hold up the word for more than 10 seconds
+    const limit = setTimeout(done, 10000);
+    sfx.onended = sfx.onerror = done;
+    sfx.src = await window.desktop.fileUrl(path);
+    sfx.play().catch(done);
+  });
+}
+
+// Plays the stop sound; resolves once it has finished, so the word can be said after it
 function playStopSound() {
+  const key = pickSound();
+  lastSound = key;
+  if (key.startsWith('file:')) return playFile(key.slice(5));
+  let seconds = 0;
   try {
     soundCtx = soundCtx || new AudioContext();
-    return (STOP_SOUNDS[stopSound] || STOP_SOUNDS.chime).play();
-  } catch {
-    return 0;  // no sound device
-  }
+    seconds = STOP_SOUNDS[key].play();
+  } catch { /* no sound device */ }
+  return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
 }
 
 function trySound() {
