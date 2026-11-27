@@ -28,20 +28,24 @@ final class StopSounds {
         float[] mix = new float[(int) (RATE * 3.6)];
         switch (key) {
             case "sleigh":
-                // A few shakes, each a cluster of tiny bells
-                for (double at : new double[]{0, 0.3, 0.6, 0.75, 0.9}) {
-                    rattle(mix, at, 0.25);
-                    for (int k = 0; k < 6; k++) {
-                        note(mix, 3000 + random.nextDouble() * 4000, at + random.nextDouble() * 0.05,
-                                0.06, 0.25, true, 0.4);
+                // "Jingle - jingle - jingle": a strap of six bells shaken three times;
+                // each shake strikes every bell once or twice
+                for (double at : new double[]{0, 0.35, 0.7}) {
+                    for (double hz : new double[]{1250, 1480, 1700, 1950, 2250, 2600}) {
+                        int hits = 1 + random.nextInt(2);
+                        for (int h = 0; h < hits; h++) {
+                            jingleBell(mix, hz * (0.99 + random.nextDouble() * 0.02), at + random.nextDouble() * 0.08,
+                                    0.06 * (0.5 + random.nextDouble() * 0.5), 0.4);
+                        }
                     }
+                    rattle(mix, at, 0.13, 0.043);
                 }
                 break;
             case "bell":
                 // A church bell's mix of tones; the low ones ring longest
                 double[][] partials = {{0.5, 0.11, 3}, {1, 0.14, 2.2}, {1.19, 0.07, 1.6}, {1.5, 0.05, 1.3},
                         {2, 0.07, 1.1}, {2.74, 0.03, 0.8}, {3.76, 0.02, 0.6}};
-                for (double[] p : partials) note(mix, 196 * p[0], 0, p[1], p[2], false, 3.5);
+                for (double[] p : partials) note(mix, 196 * p[0], 0, p[1], p[2], 3.5);
                 break;
             case "jingle": {
                 // "Jingle bells, jingle bells, jingle all the way" on bells
@@ -50,8 +54,8 @@ final class StopSounds {
                 double beat = 0.2;
                 double at = 0;
                 for (double[] n : tune) {
-                    note(mix, n[0], at, 0.22, 0.5, false, 1);
-                    note(mix, n[0] * 2, at, 0.04, 0.2, false, 1);
+                    note(mix, n[0], at, 0.22, 0.5, 1);
+                    note(mix, n[0] * 2, at, 0.04, 0.2, 1);
                     at += n[1] * beat;
                 }
                 break;
@@ -59,45 +63,53 @@ final class StopSounds {
             case "sparkle":
                 // Quick rising twinkles
                 for (int k = 0; k < 14; k++) {
-                    note(mix, 1500 + k * 180 + random.nextDouble() * 300, k * 0.05, 0.1, 0.4, false, 0.6);
+                    note(mix, 1500 + k * 180 + random.nextDouble() * 300, k * 0.05, 0.1, 0.4, 0.6);
                 }
                 break;
             default:
                 // Chime: a soft two-note "ding-dong"
-                note(mix, 784, 0, 0.3, 0.6, false, 1);
-                note(mix, 523, 0.28, 0.3, 0.6, false, 1);
+                note(mix, 784, 0, 0.3, 0.6, 1);
+                note(mix, 523, 0.28, 0.3, 0.6, 1);
         }
         return toPcm(mix);
     }
 
     // One bell-like note: fades in over 10 ms, then dies away over about `decay` seconds
-    private static void note(float[] mix, double hz, double at, double vol, double decay, boolean triangle, double len) {
+    private static void note(float[] mix, double hz, double at, double vol, double decay, double len) {
+        tone(mix, hz, at, vol, 0.01, decay / 3, len);
+    }
+
+    // A sine tone that fades in over `attack` seconds, then dies away with time constant `tc`
+    private static void tone(float[] mix, double hz, double at, double vol, double attack, double tc, double len) {
         int start = (int) (at * RATE);
         int n = Math.min((int) (len * RATE), mix.length - start);
-        double tc = decay / 3;
         for (int i = 0; i < n; i++) {
             double t = (double) i / RATE;
-            double env = t < 0.01 ? vol * t / 0.01 : vol * Math.exp(-(t - 0.01) / tc);
-            double phase = hz * t % 1;
-            double wave = triangle ? 1 - 4 * Math.abs(phase - 0.5) : Math.sin(2 * Math.PI * phase);
-            mix[start + i] += (float) (wave * env);
+            double env = t < attack ? vol * t / attack : vol * Math.exp(-(t - attack) / tc);
+            mix[start + i] += (float) (Math.sin(2 * Math.PI * (hz * t % 1)) * env);
         }
     }
 
-    // A short burst of high hiss, like bells rattling
-    private static void rattle(float[] mix, double at, double vol) {
+    // One jingle bell struck: a few out-of-tune metal tones; the high ones die away first
+    private static void jingleBell(float[] mix, double hz, double at, double vol, double decay) {
+        double[][] partials = {{1, 1}, {2.32, 0.5}, {4.25, 0.25}, {6.8, 0.12}};
+        for (double[] p : partials) tone(mix, hz * p[0], at, vol * p[1], 0.002, decay / (1 + p[0] * 0.6), decay * 4);
+    }
+
+    // The rattle of the pellets inside the bells: a short band of hiss
+    private static void rattle(float[] mix, double at, double len, double vol) {
         int start = (int) (at * RATE);
-        int n = Math.min((int) (0.12 * RATE), mix.length - start);
-        // High-pass filter at 6 kHz (a standard two-pole "biquad")
-        double w = 2 * Math.PI * 6000 / RATE;
-        double alpha = Math.sin(w) / (2 * Math.sqrt(0.5));
+        int n = Math.min((int) (len * RATE), mix.length - start);
+        // Band-pass filter around 8 kHz (a standard two-pole "biquad", like the Windows app's)
+        double w = 2 * Math.PI * 8000 / RATE;
+        double alpha = Math.sin(w) / (2 * 1.5);
         double cos = Math.cos(w);
         double a0 = 1 + alpha;
-        double b0 = (1 + cos) / 2 / a0, b1 = -(1 + cos) / a0, b2 = b0;
+        double b0 = alpha / a0, b1 = 0, b2 = -alpha / a0;
         double a1 = -2 * cos / a0, a2 = (1 - alpha) / a0;
         double x1 = 0, x2 = 0, y1 = 0, y2 = 0;
         for (int i = 0; i < n; i++) {
-            double x = (random.nextDouble() * 2 - 1) * Math.pow(1 - (double) i / n, 3);
+            double x = (random.nextDouble() * 2 - 1) * Math.pow(1 - (double) i / n, 2);
             double y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
             x2 = x1; x1 = x; y2 = y1; y1 = y;
             mix[start + i] += (float) (y * vol);

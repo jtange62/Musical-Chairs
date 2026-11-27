@@ -783,11 +783,10 @@ async function loadPads() {
 let soundCtx = null;
 
 // One bell-like note: fades in quickly, then dies away over `decay` seconds
-function note(hz, at, { vol = 0.3, decay = 0.2, type = 'sine', len = 1 } = {}) {
+function note(hz, at, { vol = 0.3, decay = 0.2, len = 1 } = {}) {
   const t = soundCtx.currentTime + at;
   const osc = soundCtx.createOscillator();
   const gain = soundCtx.createGain();
-  osc.type = type;
   osc.frequency.value = hz;
   gain.gain.setValueAtTime(0, t);
   gain.gain.linearRampToValueAtTime(vol, t + 0.01);
@@ -797,17 +796,33 @@ function note(hz, at, { vol = 0.3, decay = 0.2, type = 'sine', len = 1 } = {}) {
   osc.stop(t + len);
 }
 
-// A short burst of high hiss, like bells rattling
-function rattle(at, vol) {
-  const len = 0.12;
+// One jingle bell struck: a few out-of-tune metal tones; the high ones die away first
+function jingleBell(hz, at, vol, decay) {
+  const t = soundCtx.currentTime + at;
+  for (const [ratio, amp] of [[1, 1], [2.32, 0.5], [4.25, 0.25], [6.8, 0.12]]) {
+    const osc = soundCtx.createOscillator();
+    const gain = soundCtx.createGain();
+    osc.frequency.value = hz * ratio;
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(vol * amp, t + 0.002);
+    gain.gain.setTargetAtTime(0, t + 0.002, decay / (1 + ratio * 0.6));
+    osc.connect(gain).connect(soundCtx.destination);
+    osc.start(t);
+    osc.stop(t + decay * 4);
+  }
+}
+
+// The rattle of the pellets inside the bells: a short band of hiss
+function rattle(at, len, vol) {
   const buf = soundCtx.createBuffer(1, Math.floor(soundCtx.sampleRate * len), soundCtx.sampleRate);
   const data = buf.getChannelData(0);
-  for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 3);
+  for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 2);
   const src = soundCtx.createBufferSource();
   src.buffer = buf;
   const filter = soundCtx.createBiquadFilter();
-  filter.type = 'highpass';
-  filter.frequency.value = 6000;
+  filter.type = 'bandpass';
+  filter.frequency.value = 8000;
+  filter.Q.value = 1.5;
   const gain = soundCtx.createGain();
   gain.gain.value = vol;
   src.connect(filter).connect(gain).connect(soundCtx.destination);
@@ -826,12 +841,15 @@ const STOP_SOUNDS = {
   sleigh: {
     name: '🛷 Sleigh bells',
     play() {
-      // A few shakes, each a cluster of tiny bells
-      for (const at of [0, 0.3, 0.6, 0.75, 0.9]) {
-        rattle(at, 0.25);
-        for (let k = 0; k < 6; k++) {
-          note(3000 + Math.random() * 4000, at + Math.random() * 0.05, { vol: 0.06, decay: 0.25, type: 'triangle', len: 0.4 });
+      // "Jingle - jingle - jingle": a strap of six bells shaken three times; each shake strikes every bell once or twice
+      for (const at of [0, 0.35, 0.7]) {
+        for (const hz of [1250, 1480, 1700, 1950, 2250, 2600]) {
+          const hits = 1 + Math.floor(Math.random() * 2);
+          for (let h = 0; h < hits; h++) {
+            jingleBell(hz * (0.99 + Math.random() * 0.02), at + Math.random() * 0.08, 0.06 * (0.5 + Math.random() * 0.5), 0.4);
+          }
         }
+        rattle(at, 0.13, 0.043);
       }
     },
   },
